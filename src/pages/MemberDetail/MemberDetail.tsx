@@ -1,4 +1,5 @@
 import { useParams, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { 
   ArrowLeft, 
   Phone, 
@@ -16,15 +17,24 @@ import {
   PlusCircle,
   MinusCircle,
   Cake,
-  Activity
+  Activity,
+  MessageSquare,
+  AlertTriangle,
+  PhoneCall,
+  Heart,
+  CheckCircle,
+  Plus,
+  Edit3
 } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import Button from '@/components/Button';
+import Modal from '@/components/Modal';
 import { useMemberStore } from '@/store/useMemberStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
 import { useBirthdayCareStore } from '@/store/useBirthdayCareStore';
+import { useFollowUpStore } from '@/store/useFollowUpStore';
 import { formatMoney, formatDateTime, getDaysUntilBirthday, formatDate } from '@/utils/date';
-import type { Transaction, Recharge, PointRecord } from '@/types';
+import type { Transaction, Recharge, PointRecord, FollowUpRecord } from '@/types';
 
 type TimelineItem = {
   id: string;
@@ -38,13 +48,22 @@ export default function MemberDetail() {
   const navigate = useNavigate();
   const { getMember } = useMemberStore();
   const { getMemberTransactions, getMemberRecharges, getMemberPointRecords } = useTransactionStore();
-  const { getRecordsByMember } = useBirthdayCareStore();
+  const { getRecordsByMember: getBirthdayCareRecords } = useBirthdayCareStore();
+  const { getRecordsByMember: getFollowUpRecords, addRecord } = useFollowUpStore();
+
+  const [showFollowUpModal, setShowFollowUpModal] = useState(false);
+  const [followUpType, setFollowUpType] = useState<FollowUpRecord['type']>('phone');
+  const [followUpContent, setFollowUpContent] = useState('');
+  const [followUpResult, setFollowUpResult] = useState('');
+  const [nextFollowUpAt, setNextFollowUpAt] = useState('');
+  const [followUpOperator, setFollowUpOperator] = useState('店长');
 
   const member = getMember(id || '');
   const transactions = getMemberTransactions(id || '');
   const recharges = getMemberRecharges(id || '');
   const pointRecords = getMemberPointRecords(id || '');
-  const birthdayCareRecords = getRecordsByMember(id || '');
+  const birthdayCareRecords = getBirthdayCareRecords(id || '');
+  const followUpRecords = getFollowUpRecords(id || '');
 
   if (!member) {
     return (
@@ -61,6 +80,36 @@ export default function MemberDetail() {
   const daysSinceLastVisit = lastVisit 
     ? Math.floor((Date.now() - new Date(lastVisit).getTime()) / (1000 * 60 * 60 * 24)) 
     : null;
+
+  const getActivityLevel = () => {
+    if (daysSinceLastVisit === null) return { label: '新客户', level: 'new', color: 'violet' };
+    if (daysSinceLastVisit <= 7) return { label: '非常活跃', level: 'active', color: 'emerald' };
+    if (daysSinceLastVisit <= 30) return { label: '正常活跃', level: 'normal', color: 'blue' };
+    if (daysSinceLastVisit <= 60) return { label: '需要关注', level: 'watch', color: 'amber' };
+    if (daysSinceLastVisit <= 90) return { label: '需要唤醒', level: 'wake', color: 'orange' };
+    return { label: '沉睡客户', level: 'sleep', color: 'red' };
+  };
+
+  const activity = getActivityLevel();
+
+  const getFollowUpSuggestion = () => {
+    if (daysSinceLastVisit === null) {
+      return '新客户，3天后做首次回访，询问体验感受，邀请复购';
+    }
+    if (daysSinceLastVisit <= 7) {
+      return '近期刚到店，可发送护理小贴士，维护客情';
+    }
+    if (daysSinceLastVisit <= 30) {
+      return '正常周期，可提醒下次护理时间，推荐新品项目';
+    }
+    if (daysSinceLastVisit <= 60) {
+      return '到店间隔略长，可微信问候近况，推送老客优惠';
+    }
+    if (daysSinceLastVisit <= 90) {
+      return '有流失风险，建议电话回访，了解原因，针对性挽留';
+    }
+    return '沉睡客户，建议强力召回：生日券、专属优惠、新品体验';
+  };
 
   const favoriteServices = () => {
     const serviceCount: Record<string, number> = {};
@@ -96,58 +145,95 @@ export default function MemberDetail() {
     })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
-  const getTimelineIcon = (type: TimelineItem['type']) => {
-    switch (type) {
-      case 'transaction':
-        return <Scissors className="w-4 h-4" />;
-      case 'recharge':
-        return <Banknote className="w-4 h-4" />;
-      case 'point': {
-        const p = timeline.find(t => t.id)?.data as PointRecord;
-        if ((timeline.find(t => t.id)?.data as PointRecord)?.change > 0) {
-          return <PlusCircle className="w-4 h-4" />;
-        }
-        return <MinusCircle className="w-4 h-4" />;
-      }
-    }
-  };
-
   const getTimelineColor = (type: TimelineItem['type']) => {
     switch (type) {
       case 'transaction':
-        return {
-          dot: 'bg-blue-500',
-          line: 'bg-blue-100',
-          bg: 'bg-blue-50',
-          icon: 'text-blue-600',
-        };
+        return { dot: 'bg-blue-500', line: 'bg-blue-100', bg: 'bg-blue-50', icon: 'text-blue-600' };
       case 'recharge':
-        return {
-          dot: 'bg-emerald-500',
-          line: 'bg-emerald-100',
-          bg: 'bg-emerald-50',
-          icon: 'text-emerald-600',
-        };
+        return { dot: 'bg-emerald-500', line: 'bg-emerald-100', bg: 'bg-emerald-50', icon: 'text-emerald-600' };
       case 'point':
-        return {
-          dot: 'bg-amber-500',
-          line: 'bg-amber-100',
-          bg: 'bg-amber-50',
-          icon: 'text-amber-600',
-        };
+        return { dot: 'bg-amber-500', line: 'bg-amber-100', bg: 'bg-amber-50', icon: 'text-amber-600' };
     }
   };
 
   const getTypeLabel = (type: TimelineItem['type']) => {
     switch (type) {
-      case 'transaction':
-        return '到店消费';
-      case 'recharge':
-        return '储值充值';
-      case 'point':
-        return '积分变动';
+      case 'transaction': return '到店消费';
+      case 'recharge': return '储值充值';
+      case 'point': return '积分变动';
     }
   };
+
+  const getTypeIcon = (type: TimelineItem['type']) => {
+    switch (type) {
+      case 'transaction': return <Scissors className="w-4 h-4" />;
+      case 'recharge': return <Banknote className="w-4 h-4" />;
+      case 'point': {
+        const p = pointRecords[0];
+        return p?.change > 0 ? <PlusCircle className="w-4 h-4" /> : <MinusCircle className="w-4 h-4" />;
+      }
+    }
+  };
+
+  const getFollowUpTypeLabel = (type: FollowUpRecord['type']) => {
+    const labels = {
+      phone: '电话回访',
+      wechat: '微信沟通',
+      sms: '短信通知',
+      visit: '到店随访',
+      other: '其他',
+    };
+    return labels[type];
+  };
+
+  const getFollowUpTypeColor = (type: FollowUpRecord['type']) => {
+    const colors = {
+      phone: 'bg-blue-50 text-blue-600',
+      wechat: 'bg-emerald-50 text-emerald-600',
+      sms: 'bg-amber-50 text-amber-600',
+      visit: 'bg-violet-50 text-violet-600',
+      other: 'bg-slate-50 text-slate-600',
+    };
+    return colors[type];
+  };
+
+  const getLastTransactionSummary = () => {
+    if (transactions.length === 0) return '暂无消费记录';
+    const last = transactions[0];
+    const services = last.items.map(i => i.serviceName).join('、');
+    return `${formatDate(last.createdAt)} · ${services} · ${formatMoney(last.balanceUsed)}`;
+  };
+
+  const handleSubmitFollowUp = () => {
+    if (!followUpContent.trim()) {
+      alert('请填写回访内容');
+      return;
+    }
+    addRecord(
+      member.id,
+      member.name,
+      followUpType,
+      followUpContent,
+      followUpResult,
+      nextFollowUpAt || null,
+      followUpOperator
+    );
+    setShowFollowUpModal(false);
+    setFollowUpContent('');
+    setFollowUpResult('');
+    setNextFollowUpAt('');
+  };
+
+  const activityColors: Record<string, string> = {
+    new: 'text-violet-700 bg-violet-50 border-violet-100',
+    active: 'text-emerald-700 bg-emerald-50 border-emerald-100',
+    normal: 'text-blue-700 bg-blue-50 border-blue-100',
+    watch: 'text-amber-700 bg-amber-50 border-amber-100',
+    wake: 'text-orange-700 bg-orange-50 border-orange-100',
+    sleep: 'text-red-700 bg-red-50 border-red-100',
+  };
+
+  const isHighRisk = daysSinceLastVisit !== null && daysSinceLastVisit > 30;
 
   return (
     <div className="space-y-6">
@@ -220,6 +306,59 @@ export default function MemberDetail() {
         </div>
       </div>
 
+      <div className={`rounded-2xl p-5 border ${
+        isHighRisk 
+          ? 'bg-orange-50 border-orange-200' 
+          : 'bg-emerald-50 border-emerald-200'
+      }`}>
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-4">
+            <div className={`p-3 rounded-xl ${
+              isHighRisk ? 'bg-orange-100' : 'bg-emerald-100'
+            }`}>
+              {isHighRisk 
+                ? <AlertTriangle className={`w-6 h-6 ${isHighRisk ? 'text-orange-600' : 'text-emerald-600'}`} />
+                : <Heart className={`w-6 h-6 text-emerald-600`} />
+              }
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-800 text-lg">
+                {isHighRisk ? '⚠️ 有流失风险，建议尽快跟进' : '✅ 客户状态良好'}
+              </h3>
+              <div className="flex items-center gap-3 mt-2">
+                <span className={`px-2.5 py-1 rounded-full text-sm font-medium ${activityColors[activity.level]}`}>
+                  {activity.label}
+                </span>
+                <span className="text-sm text-slate-600">
+                  {lastVisit 
+                    ? `上次到店：${formatDate(lastVisit)}（${daysSinceLastVisit} 天前）` 
+                    : '还未到店消费'}
+                </span>
+              </div>
+              {lastVisit && (
+                <p className="text-sm text-slate-500 mt-2">
+                  上次消费：{getLastTransactionSummary()}
+                </p>
+              )}
+            </div>
+          </div>
+          <Button 
+            variant={isHighRisk ? 'warning' : 'success'}
+            onClick={() => setShowFollowUpModal(true)}
+          >
+            <Plus className="w-4 h-4" />
+            登记回访
+          </Button>
+        </div>
+        
+        {isHighRisk && (
+          <div className={`mt-4 pt-4 border-t ${isHighRisk ? 'border-orange-200' : 'border-emerald-200'}`}>
+            <p className="text-sm font-medium text-slate-700 mb-1">💡 跟进建议</p>
+            <p className="text-sm text-slate-600">{getFollowUpSuggestion()}</p>
+          </div>
+        )}
+      </div>
+
       <div className="grid grid-cols-3 gap-6">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
           <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
@@ -228,8 +367,8 @@ export default function MemberDetail() {
           </h3>
           <div className="space-y-4">
             <div className="flex items-start gap-3">
-              <div className={`p-2.5 rounded-xl ${lastVisit ? 'bg-emerald-50' : 'bg-slate-50'}`}>
-                <Clock className={`w-4 h-4 ${lastVisit ? 'text-emerald-600' : 'text-slate-400'}`} />
+              <div className="p-2.5 rounded-xl bg-blue-50">
+                <Clock className="w-4 h-4 text-blue-600" />
               </div>
               <div className="flex-1">
                 <p className="text-sm text-slate-500">上次到店</p>
@@ -237,9 +376,7 @@ export default function MemberDetail() {
                   <>
                     <p className="font-semibold text-slate-800 mt-0.5">{formatDate(lastVisit)}</p>
                     <p className="text-xs text-slate-400 mt-0.5">
-                      {daysSinceLastVisit === 0 
-                        ? '今天刚来过' 
-                        : `${daysSinceLastVisit} 天前`}
+                      {daysSinceLastVisit === 0 ? '今天刚来过' : `${daysSinceLastVisit} 天前`}
                     </p>
                   </>
                 ) : (
@@ -249,22 +386,12 @@ export default function MemberDetail() {
             </div>
 
             <div className="flex items-start gap-3">
-              <div className={`p-2.5 rounded-xl ${daysSinceLastVisit !== null && daysSinceLastVisit > 30 ? 'bg-red-50' : 'bg-blue-50'}`}>
-                <TrendingUp className={`w-4 h-4 ${daysSinceLastVisit !== null && daysSinceLastVisit > 30 ? 'text-red-600' : 'text-blue-600'}`} />
+              <div className={`p-2.5 rounded-xl bg-${activity.color}-50`}>
+                <TrendingUp className={`w-4 h-4 text-${activity.color}-600`} />
               </div>
               <div className="flex-1">
-                <p className="text-sm text-slate-500">活跃状态</p>
-                {daysSinceLastVisit === null ? (
-                  <p className="font-semibold text-slate-400 mt-0.5">新客户 - 待激活</p>
-                ) : daysSinceLastVisit <= 7 ? (
-                  <p className="font-semibold text-emerald-600 mt-0.5">非常活跃</p>
-                ) : daysSinceLastVisit <= 30 ? (
-                  <p className="font-semibold text-blue-600 mt-0.5">正常活跃</p>
-                ) : daysSinceLastVisit <= 90 ? (
-                  <p className="font-semibold text-amber-600 mt-0.5">需要唤醒</p>
-                ) : (
-                  <p className="font-semibold text-red-600 mt-0.5">沉睡客户</p>
-                )}
+                <p className="text-sm text-slate-500">活跃等级</p>
+                <p className={`font-semibold text-${activity.color}-600 mt-0.5`}>{activity.label}</p>
                 <p className="text-xs text-slate-400 mt-0.5">
                   累计充值 {formatMoney(member.totalRecharge)}
                 </p>
@@ -272,8 +399,8 @@ export default function MemberDetail() {
             </div>
 
             <div className="flex items-start gap-3">
-              <div className={`p-2.5 rounded-xl ${birthdayCareRecords.length > 0 ? 'bg-pink-50' : 'bg-slate-50'}`}>
-                <Cake className={`w-4 h-4 ${birthdayCareRecords.length > 0 ? 'text-pink-600' : 'text-slate-400'}`} />
+              <div className="p-2.5 rounded-xl bg-pink-50">
+                <Cake className="w-4 h-4 text-pink-600" />
               </div>
               <div className="flex-1">
                 <p className="text-sm text-slate-500">生日关怀</p>
@@ -288,6 +415,27 @@ export default function MemberDetail() {
                   </>
                 ) : (
                   <p className="font-semibold text-slate-400 mt-0.5">暂无关怀记录</p>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-amber-50">
+                <MessageSquare className="w-4 h-4 text-amber-600" />
+              </div>
+              <div className="flex-1">
+                <p className="text-sm text-slate-500">回访记录</p>
+                {followUpRecords.length > 0 ? (
+                  <>
+                    <p className="font-semibold text-slate-800 mt-0.5">
+                      累计 {followUpRecords.length} 次
+                    </p>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      最近：{formatDate(followUpRecords[0].createdAt)}
+                    </p>
+                  </>
+                ) : (
+                  <p className="font-semibold text-slate-400 mt-0.5">暂无回访记录</p>
                 )}
               </div>
             </div>
@@ -352,6 +500,65 @@ export default function MemberDetail() {
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+            <MessageSquare className="w-5 h-5 text-amber-500" />
+            回访记录
+          </h3>
+          <Button variant="secondary" size="sm" onClick={() => setShowFollowUpModal(true)}>
+            <Plus className="w-4 h-4" />
+            新增回访
+          </Button>
+        </div>
+
+        {followUpRecords.length === 0 ? (
+          <div className="text-center py-12 text-slate-400">
+            <PhoneCall className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">暂无回访记录</p>
+            <p className="text-sm mt-1">点击右上角登记第一次回访</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {followUpRecords.slice(0, 10).map(record => (
+              <div key={record.id} className="p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
+                <div className="flex items-start justify-between">
+                  <div className="flex items-start gap-3">
+                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
+                      {getFollowUpTypeLabel(record.type)}
+                    </span>
+                    <span className="text-xs text-slate-400 mt-1">
+                      {formatDateTime(record.createdAt)} · {record.operator}
+                    </span>
+                  </div>
+                  {record.nextFollowUpAt && (
+                    <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Clock className="w-3 h-3" />
+                      下次：{formatDate(record.nextFollowUpAt)}
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3">
+                  <p className="text-sm font-medium text-slate-700 mb-1">回访内容</p>
+                  <p className="text-sm text-slate-600">{record.content}</p>
+                </div>
+                {record.result && (
+                  <div className="mt-2 pt-2 border-t border-slate-200">
+                    <p className="text-sm font-medium text-slate-700 mb-1">回访结果</p>
+                    <p className="text-sm text-slate-600">{record.result}</p>
+                  </div>
+                )}
+              </div>
+            ))}
+            {followUpRecords.length > 10 && (
+              <p className="text-center text-sm text-slate-400 pt-2">
+                仅显示最近 10 条，共 {followUpRecords.length} 条记录
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-semibold text-slate-800 flex items-center gap-2">
             <History className="w-5 h-5 text-indigo-500" />
             到店时间线
           </h3>
@@ -394,11 +601,10 @@ export default function MemberDetail() {
             <div className="space-y-5">
               {timeline.slice(0, 30).map((item, index) => {
                 const colors = getTimelineColor(item.type);
-                const isLast = index === Math.min(timeline.length - 1, 29);
                 return (
                   <div key={item.id} className="relative">
                     <div className={`absolute -left-[30px] top-1 w-8 h-8 rounded-full ${colors.dot} ring-4 ring-white flex items-center justify-center text-white z-10`}>
-                      {getTimelineIcon(item.type)}
+                      {getTypeIcon(item.type)}
                     </div>
                     
                     <div className={`${colors.bg} rounded-xl p-4 ml-4 hover:shadow-md transition-shadow`}>
@@ -552,6 +758,88 @@ export default function MemberDetail() {
           <p className="text-slate-400 text-sm">暂未设置生日</p>
         )}
       </div>
+
+      <Modal
+        isOpen={showFollowUpModal}
+        onClose={() => setShowFollowUpModal(false)}
+        title="登记回访记录"
+        size="md"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">回访方式</label>
+            <div className="grid grid-cols-5 gap-2">
+              {(['phone', 'wechat', 'sms', 'visit', 'other'] as const).map(type => (
+                <button
+                  key={type}
+                  onClick={() => setFollowUpType(type)}
+                  className={`py-2 px-3 rounded-xl text-sm font-medium transition-colors ${
+                    followUpType === type
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {getFollowUpTypeLabel(type)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">回访内容</label>
+            <textarea
+              value={followUpContent}
+              onChange={(e) => setFollowUpContent(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              rows={3}
+              placeholder="请描述回访的主要内容，例如：询问对上次发型是否满意、提醒护理时间等"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">回访结果</label>
+            <textarea
+              value={followUpResult}
+              onChange={(e) => setFollowUpResult(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              rows={2}
+              placeholder="客户反馈、是否预约、成交情况等"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">下次回访</label>
+              <input
+                type="date"
+                value={nextFollowUpAt}
+                onChange={(e) => setNextFollowUpAt(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">回访人</label>
+              <input
+                type="text"
+                value={followUpOperator}
+                onChange={(e) => setFollowUpOperator(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="操作人姓名"
+              />
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowFollowUpModal(false)}>
+              取消
+            </Button>
+            <Button className="flex-1" onClick={handleSubmitFollowUp}>
+              <CheckCircle className="w-4 h-4" />
+              保存
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

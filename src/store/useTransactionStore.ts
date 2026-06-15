@@ -81,7 +81,6 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     };
 
     memberStore.updateBalance(memberId, -balanceUsed);
-    memberStore.updatePoints(memberId, pointsEarned - pointsUsed);
     memberStore.incrementVisit(memberId);
     memberStore.addConsumption(memberId, balanceUsed);
 
@@ -115,7 +114,6 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     };
 
     memberStore.updateBalance(memberId, amount);
-    memberStore.updatePoints(memberId, bonusPoints);
     memberStore.addRecharge(memberId, amount);
 
     const recharges = [...get().recharges, recharge];

@@ -15,12 +15,22 @@ import {
   PlusCircle,
   MinusCircle,
   Cake,
-  Banknote
+  Banknote,
+  Activity,
+  Heart,
+  MessageSquare,
+  UserPlus,
+  UserCheck,
+  Moon,
+  Zap,
+  Target
 } from 'lucide-react';
 import Button from '@/components/Button';
 import Avatar from '@/components/Avatar';
 import { useMemberStore } from '@/store/useMemberStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
+import { useBirthdayCareStore } from '@/store/useBirthdayCareStore';
+import { useFollowUpStore } from '@/store/useFollowUpStore';
 import { formatMoney, formatDateTime } from '@/utils/date';
 import { exportToCSV } from '@/utils/export';
 import type { PointRecord } from '@/types';
@@ -35,6 +45,8 @@ export default function Reports() {
     getMonthRecharges,
     getMonthPointRecords 
   } = useTransactionStore();
+  const { getMonthRecords: getMonthBirthdayCare } = useBirthdayCareStore();
+  const { getMonthRecords: getMonthFollowUps } = useFollowUpStore();
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -52,6 +64,16 @@ export default function Reports() {
   const monthPointRecords = useMemo(
     () => getMonthPointRecords(currentYear, currentMonth),
     [currentYear, currentMonth, pointRecords]
+  );
+
+  const monthBirthdayCare = useMemo(
+    () => getMonthBirthdayCare(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
+  const monthFollowUps = useMemo(
+    () => getMonthFollowUps(currentYear, currentMonth),
+    [currentYear, currentMonth]
   );
 
   const totalRecharge = useMemo(
@@ -72,6 +94,76 @@ export default function Reports() {
       return d >= start && d <= end;
     }).length;
   }, [members, currentYear, currentMonth]);
+
+  const activeMembersThisMonth = useMemo(() => {
+    const memberIds = new Set(monthTransactions.map(t => t.memberId));
+    return memberIds.size;
+  }, [monthTransactions]);
+
+  const rechargingMembersThisMonth = useMemo(() => {
+    const memberIds = new Set(monthRecharges.map(r => r.memberId));
+    return memberIds.size;
+  }, [monthRecharges]);
+
+  const sleepMembers30 = useMemo(() => {
+    const now = Date.now();
+    const memberLastVisit: Record<string, number> = {};
+    
+    transactions.forEach(t => {
+      const d = new Date(t.createdAt).getTime();
+      if (!memberLastVisit[t.memberId] || d > memberLastVisit[t.memberId]) {
+        memberLastVisit[t.memberId] = d;
+      }
+    });
+
+    let count = 0;
+    members.forEach(m => {
+      const last = memberLastVisit[m.id];
+      const days = last ? Math.floor((now - last) / (1000 * 60 * 60 * 24)) : 999;
+      if (days > 30) count++;
+    });
+    return count;
+  }, [members, transactions]);
+
+  const sleepMembers60 = useMemo(() => {
+    const now = Date.now();
+    const memberLastVisit: Record<string, number> = {};
+    
+    transactions.forEach(t => {
+      const d = new Date(t.createdAt).getTime();
+      if (!memberLastVisit[t.memberId] || d > memberLastVisit[t.memberId]) {
+        memberLastVisit[t.memberId] = d;
+      }
+    });
+
+    let count = 0;
+    members.forEach(m => {
+      const last = memberLastVisit[m.id];
+      const days = last ? Math.floor((now - last) / (1000 * 60 * 60 * 24)) : 999;
+      if (days > 60) count++;
+    });
+    return count;
+  }, [members, transactions]);
+
+  const sleepMembers90 = useMemo(() => {
+    const now = Date.now();
+    const memberLastVisit: Record<string, number> = {};
+    
+    transactions.forEach(t => {
+      const d = new Date(t.createdAt).getTime();
+      if (!memberLastVisit[t.memberId] || d > memberLastVisit[t.memberId]) {
+        memberLastVisit[t.memberId] = d;
+      }
+    });
+
+    let count = 0;
+    members.forEach(m => {
+      const last = memberLastVisit[m.id];
+      const days = last ? Math.floor((now - last) / (1000 * 60 * 60 * 24)) : 999;
+      if (days > 90) count++;
+    });
+    return count;
+  }, [members, transactions]);
 
   const pointsByType = useMemo(() => {
     const result = {
@@ -97,6 +189,12 @@ export default function Reports() {
   const totalPointsOut = Math.abs(pointsByType.spend) 
     + Math.abs(pointsByType.adjust_sub);
   const netPointsChange = totalPointsIn - totalPointsOut;
+
+  const birthdayCareStats = useMemo(() => {
+    const sent = monthBirthdayCare.filter(r => r.status !== 'pending').length;
+    const used = monthBirthdayCare.filter(r => r.status === 'used').length;
+    return { total: monthBirthdayCare.length, sent, used };
+  }, [monthBirthdayCare]);
 
   const frequentVisitors = useMemo(() => {
     const memberStats: Record<string, { name: string; count: number; amount: number }> = {};
@@ -202,22 +300,13 @@ export default function Reports() {
       { '分类': '本月净增', '笔数': monthPointRecords.length, '数量': netPointsChange },
     ];
 
-    const typeLabelMap: Record<PointRecord['type'], string> = {
-      earn: '消费获得',
-      recharge: '充值赠送',
-      birthday: '生日赠送',
-      adjust_add: '手动增加',
-      adjust_sub: '手动扣减',
-      spend: '消费抵扣',
-    };
-
     const details = monthPointRecords
       .slice()
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
       .map(r => ({
         '变动时间': formatDateTime(r.createdAt),
         '会员姓名': r.memberName,
-        '变动类型': typeLabelMap[r.type],
+        '变动类型': getTypeLabel(r.type),
         '变动数量': r.change,
         '变动原因': r.reason,
       }));
@@ -232,6 +321,34 @@ export default function Reports() {
     setTimeout(() => {
       exportToCSV(details, `积分月报明细_${currentYear}年${currentMonth}月.csv`);
     }, 200);
+  };
+
+  const handleExportOperationsReport = () => {
+    const data = [
+      { '指标': '【会员运营】', '数值': '', '备注': '' },
+      { '指标': '会员总数', '数值': members.length, '备注': '累计注册会员' },
+      { '指标': '本月新增会员', '数值': newMembersThisMonth, '备注': '' },
+      { '指标': '本月活跃会员', '数值': activeMembersThisMonth, '备注': '本月有消费的会员数' },
+      { '指标': '本月充值会员', '数值': rechargingMembersThisMonth, '备注': '本月有充值的会员数' },
+      { '指标': '会员活跃率', '数值': members.length > 0 ? ((activeMembersThisMonth / members.length) * 100).toFixed(1) + '%' : '0%', '备注': '活跃会员/总会员' },
+      { '指标': '沉睡会员(>30天)', '数值': sleepMembers30, '备注': '超过30天没到店' },
+      { '指标': '沉睡会员(>60天)', '数值': sleepMembers60, '备注': '超过60天没到店' },
+      { '指标': '沉睡会员(>90天)', '数值': sleepMembers90, '备注': '超过90天没到店' },
+      { '指标': '【消费充值】', '数值': '', '备注': '' },
+      { '指标': '本月充值总额', '数值': formatMoney(totalRecharge), '备注': `${monthRecharges.length} 笔充值` },
+      { '指标': '本月消费总额', '数值': formatMoney(totalConsumption), '备注': `${monthTransactions.length} 笔消费` },
+      { '指标': '【积分运营】', '数值': '', '备注': '' },
+      { '指标': '积分总收入', '数值': totalPointsIn.toLocaleString(), '备注': '' },
+      { '指标': '积分总支出', '数值': totalPointsOut.toLocaleString(), '备注': '' },
+      { '指标': '积分净变化', '数值': (netPointsChange >= 0 ? '+' : '') + netPointsChange.toLocaleString(), '备注': '' },
+      { '指标': '【生日关怀】', '数值': '', '备注': '' },
+      { '指标': '本月生日关怀登记', '数值': birthdayCareStats.total, '备注': '' },
+      { '指标': '本月已发放', '数值': birthdayCareStats.sent, '备注': '' },
+      { '指标': '本月已使用', '数值': birthdayCareStats.used, '备注': '' },
+      { '指标': '【回访运营】', '数值': '', '备注': '' },
+      { '指标': '本月回访次数', '数值': monthFollowUps.length, '备注': '' },
+    ];
+    exportToCSV(data, `会员运营月报_${currentYear}年${currentMonth}月.csv`);
   };
 
   const monthNames = ['一月', '二月', '三月', '四月', '五月', '六月', '七月', '八月', '九月', '十月', '十一月', '十二月'];
@@ -267,6 +384,8 @@ export default function Reports() {
     return map[type];
   };
 
+  const activationRate = members.length > 0 ? ((activeMembersThisMonth / members.length) * 100).toFixed(1) : '0';
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -287,9 +406,13 @@ export default function Reports() {
             <Download className="w-4 h-4" />
             导出消费
           </Button>
-          <Button onClick={handleExportPointsReport}>
+          <Button variant="secondary" onClick={handleExportPointsReport}>
             <Download className="w-4 h-4" />
-            导出积分月报
+            积分月报
+          </Button>
+          <Button onClick={handleExportOperationsReport}>
+            <Download className="w-4 h-4" />
+            运营月报
           </Button>
         </div>
       </div>
@@ -310,6 +433,140 @@ export default function Reports() {
         >
           <ChevronRight className="w-5 h-5 text-slate-500" />
         </button>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <h3 className="font-semibold text-slate-800 mb-5 flex items-center gap-2">
+          <Activity className="w-5 h-5 text-indigo-500" />
+          会员运营月报
+        </h3>
+
+        <div className="grid grid-cols-4 gap-4 mb-5">
+          <div className="p-4 bg-violet-50 rounded-xl">
+            <div className="flex items-center gap-2 text-violet-600 mb-2">
+              <UserPlus className="w-4 h-4" />
+              <span className="text-sm font-medium">本月新增</span>
+            </div>
+            <p className="text-2xl font-bold text-violet-700">{newMembersThisMonth} 人</p>
+            <p className="text-xs text-violet-500 mt-1">占比 {members.length > 0 ? ((newMembersThisMonth / members.length) * 100).toFixed(1) : 0}%</p>
+          </div>
+          <div className="p-4 bg-emerald-50 rounded-xl">
+            <div className="flex items-center gap-2 text-emerald-600 mb-2">
+              <UserCheck className="w-4 h-4" />
+              <span className="text-sm font-medium">活跃会员</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-700">{activeMembersThisMonth} 人</p>
+            <p className="text-xs text-emerald-500 mt-1">活跃率 {activationRate}%</p>
+          </div>
+          <div className="p-4 bg-amber-50 rounded-xl">
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <Moon className="w-4 h-4" />
+              <span className="text-sm font-medium">沉睡会员</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-700">{sleepMembers30} 人</p>
+            <p className="text-xs text-amber-500 mt-1">超过30天未到店</p>
+          </div>
+          <div className="p-4 bg-pink-50 rounded-xl">
+            <div className="flex items-center gap-2 text-pink-600 mb-2">
+              <Heart className="w-4 h-4" />
+              <span className="text-sm font-medium">生日关怀</span>
+            </div>
+            <p className="text-2xl font-bold text-pink-700">{birthdayCareStats.sent} 份</p>
+            <p className="text-xs text-pink-500 mt-1">已登记 {birthdayCareStats.total} 份</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-5 gap-4">
+          <div className="p-4 bg-blue-50 rounded-xl">
+            <div className="flex items-center gap-2 text-blue-600 mb-2">
+              <Banknote className="w-4 h-4" />
+              <span className="text-sm font-medium">充值总额</span>
+            </div>
+            <p className="text-xl font-bold text-blue-700">{formatMoney(totalRecharge)}</p>
+            <p className="text-xs text-blue-500 mt-1">{rechargingMembersThisMonth} 位会员充值</p>
+          </div>
+          <div className="p-4 bg-green-50 rounded-xl">
+            <div className="flex items-center gap-2 text-green-600 mb-2">
+              <CreditCard className="w-4 h-4" />
+              <span className="text-sm font-medium">消费总额</span>
+            </div>
+            <p className="text-xl font-bold text-green-700">{formatMoney(totalConsumption)}</p>
+            <p className="text-xs text-green-500 mt-1">{monthTransactions.length} 笔消费</p>
+          </div>
+          <div className="p-4 bg-amber-50 rounded-xl">
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <Gift className="w-4 h-4" />
+              <span className="text-sm font-medium">积分净变化</span>
+            </div>
+            <p className={`text-xl font-bold ${netPointsChange >= 0 ? 'text-amber-700' : 'text-red-700'}`}>
+              {netPointsChange >= 0 ? '+' : ''}{netPointsChange.toLocaleString()}
+            </p>
+            <p className="text-xs text-amber-500 mt-1">+{totalPointsIn.toLocaleString()} / -{totalPointsOut.toLocaleString()}</p>
+          </div>
+          <div className="p-4 bg-orange-50 rounded-xl">
+            <div className="flex items-center gap-2 text-orange-600 mb-2">
+              <Zap className="w-4 h-4" />
+              <span className="text-sm font-medium">沉睡（超60天）</span>
+            </div>
+            <p className="text-xl font-bold text-orange-700">{sleepMembers60} 人</p>
+            <p className="text-xs text-orange-500 mt-1">需重点关注</p>
+          </div>
+          <div className="p-4 bg-red-50 rounded-xl">
+            <div className="flex items-center gap-2 text-red-600 mb-2">
+              <Target className="w-4 h-4" />
+              <span className="text-sm font-medium">沉睡（超90天）</span>
+            </div>
+            <p className="text-xl font-bold text-red-700">{sleepMembers90} 人</p>
+            <p className="text-xs text-red-500 mt-1">高流失风险</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-5 mt-5">
+          <div className="p-4 bg-slate-50 rounded-xl">
+            <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <MessageSquare className="w-4 h-4 text-blue-500" />
+              回访运营
+            </h4>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-slate-800">{monthFollowUps.length}</p>
+                <p className="text-xs text-slate-500">本月回访次数</p>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-slate-800">
+                  {new Set(monthFollowUps.map(r => r.memberId)).size}
+                </p>
+                <p className="text-xs text-slate-500">回访会员数</p>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-emerald-600">
+                  {birthdayCareStats.used}
+                </p>
+                <p className="text-xs text-slate-500">生日券已使用</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-xl">
+            <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+              <PieChart className="w-4 h-4 text-violet-500" />
+              客户价值分布
+            </h4>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-violet-700">{members.length}</p>
+                <p className="text-xs text-slate-500">会员总数</p>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-amber-600">{rechargingMembersThisMonth}</p>
+                <p className="text-xs text-slate-500">本月充值人数</p>
+              </div>
+              <div className="text-center p-3 bg-white rounded-lg">
+                <p className="text-lg font-bold text-blue-600">{activeMembersThisMonth}</p>
+                <p className="text-xs text-slate-500">本月到店人数</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="grid grid-cols-4 gap-5">

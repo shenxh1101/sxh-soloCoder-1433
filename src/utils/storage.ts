@@ -4,6 +4,7 @@ const STORAGE_KEYS = {
   RECHARGES: 'hair_salon_recharges',
   POINT_RECORDS: 'hair_salon_point_records',
   BIRTHDAY_CARE: 'hair_salon_birthday_care',
+  FOLLOW_UPS: 'hair_salon_follow_ups',
   SETTINGS: 'hair_salon_settings',
 } as const;
 
@@ -40,6 +41,9 @@ export const storage = {
 
   getBirthdayCare: <T>(defaultValue: T) => getFromStorage(STORAGE_KEYS.BIRTHDAY_CARE, defaultValue),
   setBirthdayCare: <T>(value: T) => saveToStorage(STORAGE_KEYS.BIRTHDAY_CARE, value),
+
+  getFollowUps: <T>(defaultValue: T) => getFromStorage(STORAGE_KEYS.FOLLOW_UPS, defaultValue),
+  setFollowUps: <T>(value: T) => saveToStorage(STORAGE_KEYS.FOLLOW_UPS, value),
   
   getSettings: <T>(defaultValue: T) => getFromStorage(STORAGE_KEYS.SETTINGS, defaultValue),
   setSettings: <T>(value: T) => saveToStorage(STORAGE_KEYS.SETTINGS, value),

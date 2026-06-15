@@ -14,19 +14,22 @@ import { useMemberStore } from '@/store/useMemberStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
 import { useBirthdayCareStore } from '@/store/useBirthdayCareStore';
+import { useFollowUpStore } from '@/store/useFollowUpStore';
 
 function AppContent() {
   const loadMembers = useMemberStore(state => state.loadMembers);
   const loadTransactions = useTransactionStore(state => state.loadData);
   const loadSettings = useSettingsStore(state => state.loadSettings);
   const loadBirthdayCare = useBirthdayCareStore(state => state.loadRecords);
+  const loadFollowUps = useFollowUpStore(state => state.loadRecords);
 
   useEffect(() => {
     loadSettings();
     loadMembers();
     loadTransactions();
     loadBirthdayCare();
-  }, [loadSettings, loadMembers, loadTransactions, loadBirthdayCare]);
+    loadFollowUps();
+  }, [loadSettings, loadMembers, loadTransactions, loadBirthdayCare, loadFollowUps]);
 
   return (
     <Layout>

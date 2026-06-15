@@ -76,6 +76,18 @@ export interface BirthdayCareRecord {
   createdAt: string;
 }
 
+export interface FollowUpRecord {
+  id: string;
+  memberId: string;
+  memberName: string;
+  type: 'phone' | 'wechat' | 'sms' | 'visit' | 'other';
+  content: string;
+  result: string;
+  nextFollowUpAt: string | null;
+  createdAt: string;
+  operator: string;
+}
+
 export interface RechargeRule {
   amount: number;
   bonusPoints: number;
