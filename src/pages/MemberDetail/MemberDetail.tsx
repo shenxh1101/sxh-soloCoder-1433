@@ -59,9 +59,12 @@ export default function MemberDetail() {
     getRecordsByMember: getFollowUpRecords, 
     addRecord,
     completeRecord,
+    confirmRevisit,
     getOverdueDays,
     hasRevisitedAfterFollowUp,
-    getPendingFollowUps
+    getPendingFollowUps,
+    getTodayFollowUps,
+    getOverdueFollowUps
   } = useFollowUpStore();
 
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
@@ -74,6 +77,13 @@ export default function MemberDetail() {
   const [showCompleteModal, setShowCompleteModal] = useState(false);
   const [completingRecordId, setCompletingRecordId] = useState<string | null>(null);
   const [completeResult, setCompleteResult] = useState('');
+  const [completeHasAppointment, setCompleteHasAppointment] = useState(false);
+  const [completeAppointmentDate, setCompleteAppointmentDate] = useState('');
+
+  const [followUpTab, setFollowUpTab] = useState<'today' | 'overdue' | 'done'>('today');
+  const [followUpAssignee, setFollowUpAssignee] = useState('店长');
+  const [followUpHasAppointment, setFollowUpHasAppointment] = useState(false);
+  const [followUpAppointmentDate, setFollowUpAppointmentDate] = useState('');
 
   const member = getMember(id || '');
   const transactions = getMemberTransactions(id || '');
@@ -85,6 +95,9 @@ export default function MemberDetail() {
   const pendingFollowUps = followUpRecords.filter(
     r => r.status === 'pending' && r.nextFollowUpAt
   ).sort((a, b) => new Date(a.nextFollowUpAt!).getTime() - new Date(b.nextFollowUpAt!).getTime());
+
+  const todayFollowUps = getTodayFollowUps().filter(r => r.memberId === id);
+  const overdueFollowUps = getOverdueFollowUps().filter(r => r.memberId === id);
 
   const doneRecords = followUpRecords.filter(r => r.status === 'done');
   const sortedRecords = [...pendingFollowUps, ...doneRecords];
@@ -262,12 +275,18 @@ export default function MemberDetail() {
       followUpContent,
       followUpResult,
       nextFollowUpAt || null,
-      followUpOperator
+      followUpOperator,
+      followUpAssignee || followUpOperator,
+      followUpHasAppointment,
+      followUpHasAppointment ? (followUpAppointmentDate || null) : null
     );
     setShowFollowUpModal(false);
     setFollowUpContent('');
     setFollowUpResult('');
     setNextFollowUpAt('');
+    setFollowUpAssignee('店长');
+    setFollowUpHasAppointment(false);
+    setFollowUpAppointmentDate('');
   };
 
   const handleOpenCompleteModal = (recordId: string) => {
@@ -278,11 +297,18 @@ export default function MemberDetail() {
 
   const handleConfirmComplete = () => {
     if (completingRecordId) {
-      completeRecord(completingRecordId, completeResult || undefined);
+      completeRecord(
+        completingRecordId,
+        completeResult || undefined,
+        completeHasAppointment,
+        completeHasAppointment ? (completeAppointmentDate || null) : null
+      );
     }
     setShowCompleteModal(false);
     setCompletingRecordId(null);
     setCompleteResult('');
+    setCompleteHasAppointment(false);
+    setCompleteAppointmentDate('');
   };
 
   const activityColors: Record<string, string> = {
@@ -405,7 +431,7 @@ export default function MemberDetail() {
           </div>
           <Button 
             variant={isHighRisk ? 'danger' : 'success'}
-            onClick={() => setShowFollowUpModal(true)}
+            onClick={() => { setShowFollowUpModal(true); setFollowUpAssignee(followUpOperator); }}
           >
             <Plus className="w-4 h-4" />
             登记回访
@@ -568,37 +594,71 @@ export default function MemberDetail() {
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
             <AlertTriangle className="w-5 h-5 text-orange-500" />
             回访待办
-            {pendingFollowUps.length > 0 && (
-              <span className="ml-1 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
-                {pendingFollowUps.length} 项待完成
-              </span>
-            )}
           </h3>
-          <Button variant="secondary" size="sm" onClick={() => setShowFollowUpModal(true)}>
+          <Button variant="secondary" size="sm" onClick={() => { setShowFollowUpModal(true); setFollowUpAssignee(followUpOperator); }}>
             <Plus className="w-4 h-4" />
             新增回访
           </Button>
         </div>
 
-        {pendingFollowUps.length === 0 ? (
-          <div className="text-center py-10 text-slate-400">
-            <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            <p className="font-medium">暂无待办回访</p>
-            <p className="text-sm mt-1">所有回访任务都已完成，继续保持！</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {pendingFollowUps.map(record => {
-              const overdueDays = getOverdueDays(record);
-              const isOverdue = overdueDays > 0;
-              return (
-                <div 
-                  key={record.id} 
-                  className={`p-4 rounded-xl border transition-colors ${
-                    isOverdue 
-                      ? 'bg-red-50 border-red-200 hover:bg-red-100/50' 
-                      : 'bg-amber-50 border-amber-200 hover:bg-amber-100/50'
-                  }`}
+        <div className="flex gap-1 bg-slate-100 p-1 rounded-xl mb-4">
+          <button
+            onClick={() => setFollowUpTab('today')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors relative ${
+              followUpTab === 'today' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5 inline mr-1" />
+            今天要联系
+            {todayFollowUps.length > 0 && (
+              <span className="ml-1.5 bg-blue-500 text-white text-xs w-5 h-5 inline-flex items-center justify-center rounded-full">
+                {todayFollowUps.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setFollowUpTab('overdue')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors relative ${
+              followUpTab === 'overdue' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <AlertTriangle className="w-3.5 h-3.5 inline mr-1" />
+            已超期
+            {overdueFollowUps.length > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white text-xs w-5 h-5 inline-flex items-center justify-center rounded-full">
+                {overdueFollowUps.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setFollowUpTab('done')}
+            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors relative ${
+              followUpTab === 'done' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            }`}
+          >
+            <CheckCircle className="w-3.5 h-3.5 inline mr-1" />
+            已完成
+            {doneRecords.length > 0 && (
+              <span className="ml-1.5 bg-slate-400 text-white text-xs w-5 h-5 inline-flex items-center justify-center rounded-full">
+                {doneRecords.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {followUpTab === 'today' && (
+          todayFollowUps.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <Clock className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">今天没有待联系的客户</p>
+              <p className="text-sm mt-1">今日回访任务已清空</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {todayFollowUps.map(record => (
+                <div
+                  key={record.id}
+                  className="p-4 rounded-xl border bg-blue-50 border-blue-200 hover:bg-blue-100/50 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex items-start gap-3 flex-1">
@@ -612,30 +672,27 @@ export default function MemberDetail() {
                           </span>
                           <span className="text-xs text-slate-500">
                             创建：{formatDate(record.createdAt)} · {record.operator}
+                            {record.assignee && record.assignee !== record.operator && (
+                              <span className="text-blue-600"> · 负责人：{record.assignee}</span>
+                            )}
                           </span>
                         </div>
                         <p className="text-sm font-medium text-slate-800 mb-1">回访内容</p>
                         <p className="text-sm text-slate-600 line-clamp-2 mb-3">{record.content}</p>
                         <div className="flex items-center gap-4 flex-wrap">
-                          <span className="text-xs flex items-center gap-1 text-slate-600">
-                            <Calendar className="w-3.5 h-3.5" />
-                            截止日期：{formatDate(record.nextFollowUpAt!)}
+                          <span className="text-xs flex items-center gap-1 text-blue-600 bg-blue-100 px-2 py-0.5 rounded-full">
+                            <Clock className="w-3.5 h-3.5" />
+                            今天需联系
                           </span>
-                          {isOverdue ? (
-                            <span className="text-xs flex items-center gap-1 text-red-600 font-semibold bg-red-100 px-2 py-0.5 rounded-full">
-                              <XCircle className="w-3.5 h-3.5" />
-                              已拖延 {overdueDays} 天
-                            </span>
-                          ) : (
-                            <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
-                              <Clock className="w-3.5 h-3.5" />
-                              待跟进
+                          {record.hasAppointment && record.appointmentDate && (
+                            <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                              📅 已预约 {formatDate(record.appointmentDate)}
                             </span>
                           )}
                         </div>
                       </div>
                     </div>
-                    <Button 
+                    <Button
                       size="sm"
                       onClick={() => handleOpenCompleteModal(record.id)}
                       className="flex-shrink-0"
@@ -645,9 +702,156 @@ export default function MemberDetail() {
                     </Button>
                   </div>
                 </div>
-              );
-            })}
-          </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {followUpTab === 'overdue' && (
+          overdueFollowUps.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">没有超期的回访</p>
+              <p className="text-sm mt-1">所有回访都在按时推进</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {overdueFollowUps.map(record => {
+                const overdueDays = getOverdueDays(record);
+                return (
+                  <div
+                    key={record.id}
+                    className="p-4 rounded-xl border bg-red-50 border-red-200 hover:bg-red-100/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 flex-1">
+                        <div className={`p-2.5 rounded-xl flex-shrink-0 ${getFollowUpTypeIconBg(record.type)}`}>
+                          {getFollowUpTypeIcon(record.type)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
+                              {getFollowUpTypeLabel(record.type)}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              创建：{formatDate(record.createdAt)} · {record.operator}
+                              {record.assignee && record.assignee !== record.operator && (
+                                <span className="text-red-600"> · 负责人：{record.assignee}</span>
+                              )}
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium text-slate-800 mb-1">回访内容</p>
+                          <p className="text-sm text-slate-600 line-clamp-2 mb-3">{record.content}</p>
+                          <div className="flex items-center gap-4 flex-wrap">
+                            <span className="text-xs flex items-center gap-1 text-slate-600">
+                              <Calendar className="w-3.5 h-3.5" />
+                              截止日期：{formatDate(record.nextFollowUpAt!)}
+                            </span>
+                            <span className="text-xs flex items-center gap-1 text-red-600 font-semibold bg-red-100 px-2 py-0.5 rounded-full">
+                              <XCircle className="w-3.5 h-3.5" />
+                              已拖延 {overdueDays} 天
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        onClick={() => handleOpenCompleteModal(record.id)}
+                        className="flex-shrink-0"
+                      >
+                        <Check className="w-4 h-4" />
+                        标记完成
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {followUpTab === 'done' && (
+          doneRecords.length === 0 ? (
+            <div className="text-center py-10 text-slate-400">
+              <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
+              <p className="font-medium">暂无已完成的回访</p>
+              <p className="text-sm mt-1">完成回访后会在这里显示</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {doneRecords.map(record => {
+                const revisitInfo = hasRevisitedAfterFollowUp(record.id);
+                return (
+                  <div
+                    key={record.id}
+                    className="p-4 rounded-xl bg-slate-50 border border-slate-100 hover:bg-slate-100/50 transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex items-start gap-3 flex-1">
+                        <div className={`p-2.5 rounded-xl flex-shrink-0 ${getFollowUpTypeIconBg(record.type)}`}>
+                          {getFollowUpTypeIcon(record.type)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-2">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
+                              {getFollowUpTypeLabel(record.type)}
+                            </span>
+                            <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-600">
+                              <CheckCircle className="w-3 h-3 mr-1" />
+                              已完成
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              {formatDateTime(record.completedAt || record.createdAt)} · {record.operator}
+                              {record.assignee && record.assignee !== record.operator && (
+                                <span> · 负责人：{record.assignee}</span>
+                              )}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-600 line-clamp-2 mb-2">{record.content}</p>
+                          {record.result && (
+                            <p className="text-sm text-slate-500 mb-2">结果：{record.result}</p>
+                          )}
+                          <div className="flex items-center gap-3 flex-wrap">
+                            {record.hasAppointment && record.appointmentDate && (
+                              <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                📅 已预约 {formatDate(record.appointmentDate)}
+                              </span>
+                            )}
+                            {record.revisitConfirmedAt ? (
+                              <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                ✅ 已到店
+                              </span>
+                            ) : revisitInfo?.revisited ? (
+                              <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                ✅ 已回店
+                              </span>
+                            ) : (
+                              <span className="text-xs flex items-center gap-1 text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                <XCircle className="w-3 h-3" />
+                                未回店
+                              </span>
+                            )}
+                            {record.hasAppointment && !record.revisitConfirmedAt && (
+                              <Button
+                                size="sm"
+                                variant="success"
+                                onClick={() => confirmRevisit(record.id)}
+                                className="text-xs"
+                              >
+                                <Check className="w-3 h-3" />
+                                确认到店
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
         )}
       </div>
 
@@ -721,24 +925,39 @@ export default function MemberDetail() {
                         {formatDate(record.nextFollowUpAt)}
                       </span>
                     )}
-                    {!isPending && revisitInfo && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
-                        revisitInfo.revisited 
-                          ? 'bg-emerald-50 text-emerald-600' 
-                          : 'bg-slate-100 text-slate-400'
-                      }`}>
-                        {revisitInfo.revisited ? (
-                          <>
-                            <CheckCircle className="w-3 h-3" />
+                    {!isPending && (
+                      <div className="flex items-center gap-2">
+                        {record.hasAppointment && record.appointmentDate && (
+                          <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-emerald-50 text-emerald-600">
+                            📅 已预约 {formatDate(record.appointmentDate)}
+                          </span>
+                        )}
+                        {record.revisitConfirmedAt ? (
+                          <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-emerald-50 text-emerald-600">
+                            ✅ 已到店
+                          </span>
+                        ) : revisitInfo?.revisited ? (
+                          <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-emerald-50 text-emerald-600">
                             ✅ 已回店
-                          </>
+                          </span>
                         ) : (
-                          <>
+                          <span className="text-xs px-2 py-0.5 rounded-full flex items-center gap-1 bg-slate-100 text-slate-400">
                             <XCircle className="w-3 h-3" />
                             未回店
-                          </>
+                          </span>
                         )}
-                      </span>
+                        {record.hasAppointment && !record.revisitConfirmedAt && (
+                          <Button
+                            size="sm"
+                            variant="success"
+                            onClick={() => confirmRevisit(record.id)}
+                            className="text-xs h-6 px-2"
+                          >
+                            <Check className="w-3 h-3" />
+                            确认到店
+                          </Button>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="mt-3">
@@ -1041,6 +1260,45 @@ export default function MemberDetail() {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">负责人</label>
+              <input
+                type="text"
+                value={followUpAssignee}
+                onChange={(e) => setFollowUpAssignee(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="默认与回访人相同"
+              />
+            </div>
+            <div className="flex items-end gap-3">
+              <label className="flex items-center gap-2 cursor-pointer py-2.5">
+                <input
+                  type="checkbox"
+                  checked={followUpHasAppointment}
+                  onChange={(e) => {
+                    setFollowUpHasAppointment(e.target.checked);
+                    if (!e.target.checked) setFollowUpAppointmentDate('');
+                  }}
+                  className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                />
+                <span className="text-sm font-medium text-slate-700">是否有预约</span>
+              </label>
+            </div>
+          </div>
+
+          {followUpHasAppointment && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">预约到店日期</label>
+              <input
+                type="date"
+                value={followUpAppointmentDate}
+                onChange={(e) => setFollowUpAppointmentDate(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          )}
+
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" className="flex-1" onClick={() => setShowFollowUpModal(false)}>
               取消
@@ -1070,6 +1328,33 @@ export default function MemberDetail() {
               placeholder="补充本次回访的结果，如客户反馈、预约情况、成交情况等"
             />
           </div>
+
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={completeHasAppointment}
+                onChange={(e) => {
+                  setCompleteHasAppointment(e.target.checked);
+                  if (!e.target.checked) setCompleteAppointmentDate('');
+                }}
+                className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+              />
+              <span className="text-sm font-medium text-slate-700">是否有预约</span>
+            </label>
+          </div>
+
+          {completeHasAppointment && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">预约到店日期</label>
+              <input
+                type="date"
+                value={completeAppointmentDate}
+                onChange={(e) => setCompleteAppointmentDate(e.target.value)}
+                className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+          )}
 
           <div className="flex gap-3 pt-2">
             <Button variant="secondary" className="flex-1" onClick={() => setShowCompleteModal(false)}>

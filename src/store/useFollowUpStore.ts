@@ -16,12 +16,17 @@ interface FollowUpState {
     content: string,
     result: string,
     nextFollowUpAt?: string | null,
-    operator?: string
+    operator?: string,
+    assignee?: string,
+    hasAppointment?: boolean,
+    appointmentDate?: string | null
   ) => FollowUpRecord;
   
   updateRecord: (id: string, data: Partial<FollowUpRecord>) => void;
   
-  completeRecord: (id: string, result?: string) => void;
+  completeRecord: (id: string, result?: string, hasAppointment?: boolean, appointmentDate?: string | null) => void;
+  
+  confirmRevisit: (id: string) => void;
   
   deleteRecord: (id: string) => void;
   
@@ -32,6 +37,8 @@ interface FollowUpState {
   getCompletedMonthRecords: (year: number, month: number) => FollowUpRecord[];
   
   getPendingFollowUps: () => FollowUpRecord[];
+  
+  getTodayFollowUps: () => FollowUpRecord[];
   
   getOverdueFollowUps: () => FollowUpRecord[];
   
@@ -44,14 +51,28 @@ interface FollowUpState {
     completed: number;
     revisitedCount: number;
     rechargeCount: number;
+    appointmentCount: number;
     revisitedMemberIds: string[];
   };
+  
+  getAssigneeMonthStats: (year: number, month: number) => {
+    assignee: string;
+    total: number;
+    completed: number;
+    revisitedCount: number;
+    rechargeCount: number;
+    appointmentCount: number;
+  }[];
 }
 
 const upgradeRecord = (r: any): FollowUpRecord => ({
   ...r,
   status: r.status || 'pending',
   completedAt: r.completedAt || null,
+  assignee: r.assignee || r.operator || '店长',
+  hasAppointment: r.hasAppointment || false,
+  appointmentDate: r.appointmentDate || null,
+  revisitConfirmedAt: r.revisitConfirmedAt || null,
 });
 
 export const useFollowUpStore = create<FollowUpState>((set, get) => ({
@@ -63,7 +84,7 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
     set({ records });
   },
 
-  addRecord: (memberId, memberName, type, content, result, nextFollowUpAt = null, operator = '店长') => {
+  addRecord: (memberId, memberName, type, content, result, nextFollowUpAt = null, operator = '店长', assignee = '店长', hasAppointment = false, appointmentDate = null) => {
     const now = new Date().toISOString();
     const record: FollowUpRecord = {
       id: generateId(),
@@ -77,6 +98,10 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
       operator,
       status: nextFollowUpAt ? 'pending' : 'done',
       completedAt: nextFollowUpAt ? null : now,
+      assignee: assignee || operator,
+      hasAppointment,
+      appointmentDate,
+      revisitConfirmedAt: null,
     };
 
     const records = [...get().records, record];
@@ -93,7 +118,7 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
     storage.setFollowUps(records);
   },
 
-  completeRecord: (id, result) => {
+  completeRecord: (id, result, hasAppointment, appointmentDate) => {
     const now = new Date().toISOString();
     const records = get().records.map(r => {
       if (r.id !== id) return r;
@@ -102,7 +127,18 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
         status: 'done' as const,
         completedAt: now,
         result: result ?? r.result,
+        hasAppointment: hasAppointment ?? r.hasAppointment,
+        appointmentDate: appointmentDate ?? r.appointmentDate,
       };
+    });
+    set({ records });
+    storage.setFollowUps(records);
+  },
+
+  confirmRevisit: (id) => {
+    const records = get().records.map(r => {
+      if (r.id !== id) return r;
+      return { ...r, revisitConfirmedAt: new Date().toISOString() };
     });
     set({ records });
     storage.setFollowUps(records);
@@ -145,18 +181,38 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
       .sort((a, b) => new Date(a.nextFollowUpAt!).getTime() - new Date(b.nextFollowUpAt!).getTime());
   },
 
-  getOverdueFollowUps: () => {
-    const now = Date.now();
+  getTodayFollowUps: () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
     return get().records
-      .filter(r => r.status === 'pending' && r.nextFollowUpAt && new Date(r.nextFollowUpAt).getTime() <= now)
+      .filter(r => {
+        if (r.status !== 'pending' || !r.nextFollowUpAt) return false;
+        const d = new Date(r.nextFollowUpAt);
+        return d >= today && d < tomorrow;
+      })
+      .sort((a, b) => new Date(a.nextFollowUpAt!).getTime() - new Date(b.nextFollowUpAt!).getTime());
+  },
+
+  getOverdueFollowUps: () => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return get().records
+      .filter(r => {
+        if (r.status !== 'pending' || !r.nextFollowUpAt) return false;
+        return new Date(r.nextFollowUpAt) < today;
+      })
       .sort((a, b) => new Date(a.nextFollowUpAt!).getTime() - new Date(b.nextFollowUpAt!).getTime());
   },
 
   getOverdueDays: (record) => {
     if (!record.nextFollowUpAt || record.status === 'done') return 0;
-    const now = new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
     const due = new Date(record.nextFollowUpAt);
-    const diff = Math.floor((now.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
+    due.setHours(0, 0, 0, 0);
+    const diff = Math.floor((today.getTime() - due.getTime()) / (1000 * 60 * 60 * 24));
     return Math.max(0, diff);
   },
 
@@ -164,9 +220,15 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
     const record = get().records.find(r => r.id === followUpId);
     if (!record) return { revisited: false };
     
+    if (record.revisitConfirmedAt) {
+      return { revisited: true, visitDate: record.revisitConfirmedAt };
+    }
+    
     const txState = useTransactionStore.getState();
     const txns = txState.getMemberTransactions(record.memberId);
-    const followUpTime = new Date(record.createdAt).getTime();
+    const followUpTime = record.completedAt 
+      ? new Date(record.completedAt).getTime() 
+      : new Date(record.createdAt).getTime();
     const revisit = txns.find(t => new Date(t.createdAt).getTime() >= followUpTime);
     
     if (revisit) {
@@ -186,7 +248,9 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
     const rechargeMemberIds: string[] = [];
 
     completed.forEach(r => {
-      const followUpTime = new Date(r.createdAt).getTime();
+      const followUpTime = r.completedAt 
+        ? new Date(r.completedAt).getTime() 
+        : new Date(r.createdAt).getTime();
 
       const txns = txState.getMemberTransactions(r.memberId);
       const revisit = txns.find(t => {
@@ -208,11 +272,68 @@ export const useFollowUpStore = create<FollowUpState>((set, get) => ({
     });
 
     return {
-      total: get().getMonthRecords(year, month).length,
+      total: get().getCompletedMonthRecords(year, month).length,
       completed: completed.length,
       revisitedCount: revisitedMemberIds.length,
       rechargeCount: rechargeMemberIds.length,
+      appointmentCount: completed.filter(r => r.hasAppointment).length,
       revisitedMemberIds,
     };
+  },
+
+  getAssigneeMonthStats: (year, month) => {
+    const completed = get().getCompletedMonthRecords(year, month);
+    const all = get().getMonthRecords(year, month);
+    const txState = useTransactionStore.getState();
+    const end = new Date(year, month, 0, 23, 59, 59);
+    const endTime = end.getTime();
+
+    const assigneeMap = new Map<string, {
+      total: number;
+      completed: number;
+      revisitedCount: number;
+      rechargeCount: number;
+      appointmentCount: number;
+    }>();
+
+    all.forEach(r => {
+      const name = r.assignee || r.operator || '未分配';
+      if (!assigneeMap.has(name)) {
+        assigneeMap.set(name, { total: 0, completed: 0, revisitedCount: 0, rechargeCount: 0, appointmentCount: 0 });
+      }
+      const stats = assigneeMap.get(name)!;
+      stats.total++;
+    });
+
+    completed.forEach(r => {
+      const name = r.assignee || r.operator || '未分配';
+      const stats = assigneeMap.get(name);
+      if (!stats) return;
+      stats.completed++;
+      if (r.hasAppointment) stats.appointmentCount++;
+
+      const followUpTime = r.completedAt 
+        ? new Date(r.completedAt).getTime() 
+        : new Date(r.createdAt).getTime();
+
+      const txns = txState.getMemberTransactions(r.memberId);
+      const revisit = txns.find(t => {
+        const tTime = new Date(t.createdAt).getTime();
+        return tTime >= followUpTime && tTime <= endTime;
+      });
+      if (revisit) stats.revisitedCount++;
+
+      const recharges = txState.getMemberRecharges(r.memberId);
+      const recharge = recharges.find(rc => {
+        const rTime = new Date(rc.createdAt).getTime();
+        return rTime >= followUpTime && rTime <= endTime;
+      });
+      if (recharge) stats.rechargeCount++;
+    });
+
+    return Array.from(assigneeMap.entries()).map(([assignee, stats]) => ({
+      assignee,
+      ...stats,
+    })).sort((a, b) => b.completed - a.completed);
   },
 }));

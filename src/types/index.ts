@@ -88,6 +88,10 @@ export interface FollowUpRecord {
   operator: string;
   status: 'pending' | 'done';
   completedAt: string | null;
+  assignee: string;
+  hasAppointment: boolean;
+  appointmentDate: string | null;
+  revisitConfirmedAt: string | null;
 }
 
 export interface RechargeRule {

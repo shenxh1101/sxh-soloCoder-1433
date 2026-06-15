@@ -26,7 +26,9 @@ import {
   Target,
   ArrowRight,
   RefreshCw,
-  Star
+  Star,
+  Layers,
+  UserCog
 } from 'lucide-react';
 import Button from '@/components/Button';
 import Avatar from '@/components/Avatar';
@@ -56,7 +58,8 @@ export default function Reports() {
   const { 
     getMonthRecords: getMonthFollowUps, 
     getMonthEffectiveness,
-    getCompletedMonthRecords 
+    getCompletedMonthRecords,
+    getAssigneeMonthStats
   } = useFollowUpStore();
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
@@ -101,6 +104,73 @@ export default function Reports() {
     () => getMonthEffectiveness(currentYear, currentMonth),
     [currentYear, currentMonth]
   );
+
+  const completedMonthFollowUps = useMemo(
+    () => getCompletedMonthRecords(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
+  const assigneeMonthStats = useMemo(
+    () => getAssigneeMonthStats(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
+  const highValueMembers = useMemo(() => {
+    const monthStart = new Date(currentYear, currentMonth - 1, 1).getTime();
+    const memberHasTxThisMonth = new Set(monthTransactions.map(t => t.memberId));
+    const memberHadTxBeforeMonth = new Set<string>();
+    transactions.forEach(t => {
+      if (new Date(t.createdAt).getTime() < monthStart) {
+        memberHadTxBeforeMonth.add(t.memberId);
+      }
+    });
+    return members.filter(m =>
+      m.totalRecharge >= 500 &&
+      memberHasTxThisMonth.has(m.id) &&
+      memberHadTxBeforeMonth.has(m.id)
+    );
+  }, [members, monthTransactions, transactions, currentYear, currentMonth]);
+
+  const silentMembers = useMemo(() => {
+    const now = Date.now();
+    const sixtyDaysAgo = now - 60 * 24 * 60 * 60 * 1000;
+    const memberLastVisit: Record<string, number> = {};
+    transactions.forEach(t => {
+      const d = new Date(t.createdAt).getTime();
+      if (!memberLastVisit[t.memberId] || d > memberLastVisit[t.memberId]) {
+        memberLastVisit[t.memberId] = d;
+      }
+    });
+    return members.filter(m => {
+      const lastVisit = memberLastVisit[m.id];
+      return lastVisit && lastVisit < sixtyDaysAgo;
+    });
+  }, [members, transactions]);
+
+  const rechargedNoRepurchaseMembers = useMemo(() => {
+    const rechargedIds = new Set(monthRecharges.map(r => r.memberId));
+    const consumedIds = new Set(monthTransactions.map(t => t.memberId));
+    return members.filter(m => rechargedIds.has(m.id) && !consumedIds.has(m.id));
+  }, [members, monthRecharges, monthTransactions]);
+
+  const memberLastVisitMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    transactions.forEach(t => {
+      const d = new Date(t.createdAt).getTime();
+      if (!map[t.memberId] || d > map[t.memberId]) {
+        map[t.memberId] = d;
+      }
+    });
+    return map;
+  }, [transactions]);
+
+  const memberMonthRechargeMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    monthRecharges.forEach(r => {
+      map[r.memberId] = (map[r.memberId] || 0) + r.amount;
+    });
+    return map;
+  }, [monthRecharges]);
 
   const totalRecharge = useMemo(
     () => monthRecharges.reduce((sum, r) => sum + r.amount, 0),
@@ -464,11 +534,11 @@ export default function Reports() {
   };
 
   const handleExportOperationsReport = () => {
-    const completionRate = monthEffectiveness.total > 0 
-      ? ((monthEffectiveness.completed / monthEffectiveness.total) * 100).toFixed(1) + '%' 
+    const completionRate = monthFollowUps.length > 0 
+      ? ((completedMonthFollowUps.length / monthFollowUps.length) * 100).toFixed(1) + '%' 
       : '0%';
-    const revisitRate = monthEffectiveness.completed > 0 
-      ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) + '%' 
+    const revisitRate = completedMonthFollowUps.length > 0 
+      ? ((monthEffectiveness.revisitedCount / completedMonthFollowUps.length) * 100).toFixed(1) + '%' 
       : '0%';
     const rechargeRate = monthEffectiveness.revisitedCount > 0 
       ? ((monthEffectiveness.rechargeCount / monthEffectiveness.revisitedCount) * 100).toFixed(1) + '%' 
@@ -495,6 +565,10 @@ export default function Reports() {
       { '指标': '【老客回流】', '数值': '', '备注': '' },
       { '指标': '沉睡回流水数', '数值': reflowMembers.length, '备注': '超30天未到店本月有消费' },
       { '指标': '重点跟进回店数', '数值': keyFollowUpMembers.length, '备注': '回访后回店的会员数' },
+      { '指标': '【会员分层复盘】', '数值': '', '备注': '' },
+      { '指标': '高价值老客', '数值': highValueMembers.length, '备注': `贡献金额 ${highValueMembers.reduce((s, m) => s + m.totalConsumption, 0).toFixed(2)}` },
+      { '指标': '最近沉默', '数值': silentMembers.length, '备注': `贡献金额 ${silentMembers.reduce((s, m) => s + m.totalConsumption, 0).toFixed(2)}` },
+      { '指标': '刚充值未复购', '数值': rechargedNoRepurchaseMembers.length, '备注': `贡献金额 ${rechargedNoRepurchaseMembers.reduce((s, m) => s + m.totalConsumption, 0).toFixed(2)}` },
       { '指标': '【消费充值】', '数值': '', '备注': '' },
       { '指标': '本月充值总额', '数值': formatMoney(totalRecharge), '备注': `${monthRecharges.length} 笔充值` },
       { '指标': '本月消费总额', '数值': formatMoney(totalConsumption), '备注': `${monthTransactions.length} 笔消费` },
@@ -507,13 +581,19 @@ export default function Reports() {
       { '指标': '本月已发放', '数值': birthdayCareStats.sent, '备注': '按发放时间统计' },
       { '指标': '本月已使用', '数值': birthdayCareStats.used, '备注': '按使用时间统计' },
       { '指标': '【回访运营成效】', '数值': '', '备注': '' },
-      { '指标': '本月登记回访数', '数值': monthEffectiveness.total, '备注': '' },
-      { '指标': '本月已完成回访数', '数值': monthEffectiveness.completed, '备注': '' },
-      { '指标': '回访完成率', '数值': completionRate, '备注': '' },
-      { '指标': '回访后回店人数', '数值': monthEffectiveness.revisitedCount, '备注': '' },
-      { '指标': '回店率', '数值': revisitRate, '备注': '回店人数/完成回访数' },
-      { '指标': '回访后充值人数', '数值': monthEffectiveness.rechargeCount, '备注': '' },
+      { '指标': '本月登记回访数', '数值': monthFollowUps.length, '备注': '本月创建的回访记录' },
+      { '指标': '本月已完成回访数', '数值': completedMonthFollowUps.length, '备注': '本月完成的回访记录' },
+      { '指标': '回访完成率', '数值': completionRate, '备注': '已完成/登记' },
+      { '指标': '回访后回店人数', '数值': monthEffectiveness.revisitedCount, '备注': '基于已完成回访' },
+      { '指标': '回店率', '数值': revisitRate, '备注': '回店人数/已完成回访数' },
+      { '指标': '回访后充值人数', '数值': monthEffectiveness.rechargeCount, '备注': '基于已完成回访' },
       { '指标': '充值转化率', '数值': rechargeRate, '备注': '充值人数/回店人数' },
+      { '指标': '【员工跟进成效】', '数值': '', '备注': '' },
+      ...assigneeMonthStats.map(s => ({
+        '指标': s.assignee,
+        '数值': `完成${s.completed}/${s.total}`,
+        '备注': `完成率${s.total > 0 ? ((s.completed / s.total) * 100).toFixed(1) : 0}% | 回店${s.revisitedCount} | 充值${s.rechargeCount} | 预约${s.appointmentCount}`,
+      })),
     ];
     exportToCSV(data, `会员运营月报_${currentYear}年${currentMonth}月.csv`);
   };
@@ -705,17 +785,17 @@ export default function Reports() {
               <div className="grid grid-cols-3 gap-3">
                 <div className="text-center p-3 bg-white rounded-lg">
                   <p className="text-xs text-slate-500 mb-1">登记回访</p>
-                  <p className="text-lg font-bold text-slate-800">{monthEffectiveness.total}</p>
+                  <p className="text-lg font-bold text-slate-800">{monthFollowUps.length}</p>
                 </div>
                 <div className="text-center p-3 bg-white rounded-lg">
                   <p className="text-xs text-slate-500 mb-1">已完成</p>
-                  <p className="text-lg font-bold text-emerald-600">{monthEffectiveness.completed}</p>
+                  <p className="text-lg font-bold text-emerald-600">{completedMonthFollowUps.length}</p>
                 </div>
                 <div className="text-center p-3 bg-white rounded-lg">
                   <p className="text-xs text-slate-500 mb-1">完成率</p>
                   <p className="text-lg font-bold text-violet-600">
-                    {monthEffectiveness.total > 0 
-                      ? ((monthEffectiveness.completed / monthEffectiveness.total) * 100).toFixed(1) 
+                    {monthFollowUps.length > 0 
+                      ? ((completedMonthFollowUps.length / monthFollowUps.length) * 100).toFixed(1) 
                       : 0}%
                   </p>
                 </div>
@@ -729,12 +809,12 @@ export default function Reports() {
                   <div className="flex items-baseline justify-between">
                     <p className="text-lg font-bold text-blue-600">{monthEffectiveness.revisitedCount}</p>
                     <p className={`text-sm font-semibold px-2 py-0.5 rounded-full ${getRateColor(
-                      monthEffectiveness.completed > 0 
-                        ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) 
+                      completedMonthFollowUps.length > 0 
+                        ? ((monthEffectiveness.revisitedCount / completedMonthFollowUps.length) * 100).toFixed(1) 
                         : '0'
                     )}`}>
-                      {monthEffectiveness.completed > 0 
-                        ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) 
+                      {completedMonthFollowUps.length > 0 
+                        ? ((monthEffectiveness.revisitedCount / completedMonthFollowUps.length) * 100).toFixed(1) 
                         : 0}%
                     </p>
                   </div>
@@ -780,6 +860,59 @@ export default function Reports() {
               </div>
             </div>
           </div>
+        </div>
+
+        <div className="mt-5 p-4 bg-slate-50 rounded-xl">
+          <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+            <UserCog className="w-4 h-4 text-teal-500" />
+            员工跟进成效
+          </h4>
+          {assigneeMonthStats.length === 0 ? (
+            <div className="text-center py-6 text-slate-400">
+              <UserCog className="w-10 h-10 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">本月暂无回访任务分配</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-white">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">员工</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">分配任务</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">已完成</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">完成率</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">带回到店</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">带回充值</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-slate-600">预约数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {assigneeMonthStats.map((s) => (
+                    <tr key={s.assignee} className="border-b border-slate-100 hover:bg-white/50">
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Avatar name={s.assignee} size="sm" />
+                          <span className="font-medium text-slate-700 text-sm">{s.assignee}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-center text-sm text-slate-600">{s.total}</td>
+                      <td className="px-3 py-2 text-center text-sm font-semibold text-emerald-600">{s.completed}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${getRateColor(
+                          s.total > 0 ? ((s.completed / s.total) * 100).toFixed(1) : '0'
+                        )}`}>
+                          {s.total > 0 ? ((s.completed / s.total) * 100).toFixed(1) : 0}%
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-center text-sm text-blue-600 font-medium">{s.revisitedCount}</td>
+                      <td className="px-3 py-2 text-center text-sm text-emerald-600 font-medium">{s.rechargeCount}</td>
+                      <td className="px-3 py-2 text-center text-sm text-violet-600 font-medium">{s.appointmentCount}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 
@@ -943,6 +1076,141 @@ export default function Reports() {
               </table>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <h3 className="font-semibold text-slate-800 mb-5 flex items-center gap-2">
+          <Layers className="w-5 h-5 text-indigo-500" />
+          会员分层复盘
+        </h3>
+
+        <div className="grid grid-cols-3 gap-4 mb-5">
+          <div className="p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+            <div className="flex items-center gap-2 text-emerald-600 mb-2">
+              <Star className="w-4 h-4" />
+              <span className="text-sm font-medium">高价值老客</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-700">{highValueMembers.length} 人</p>
+            <p className="text-xs text-emerald-500 mt-1">
+              贡献 {formatMoney(highValueMembers.reduce((s, m) => s + m.totalConsumption, 0))}
+            </p>
+          </div>
+          <div className="p-4 bg-amber-50 rounded-xl border border-amber-100">
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <Moon className="w-4 h-4" />
+              <span className="text-sm font-medium">最近沉默</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-700">{silentMembers.length} 人</p>
+            <p className="text-xs text-amber-500 mt-1">
+              贡献 {formatMoney(silentMembers.reduce((s, m) => s + m.totalConsumption, 0))}
+            </p>
+          </div>
+          <div className="p-4 bg-red-50 rounded-xl border border-red-100">
+            <div className="flex items-center gap-2 text-red-600 mb-2">
+              <Zap className="w-4 h-4" />
+              <span className="text-sm font-medium">刚充值未复购</span>
+            </div>
+            <p className="text-2xl font-bold text-red-700">{rechargedNoRepurchaseMembers.length} 人</p>
+            <p className="text-xs text-red-500 mt-1">
+              贡献 {formatMoney(rechargedNoRepurchaseMembers.reduce((s, m) => s + m.totalConsumption, 0))}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-4">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-600 mb-2">高价值老客明细</h4>
+            <p className="text-xs text-slate-400 mb-2">累计充值≥500 且 本月有消费且之前也有消费</p>
+            {highValueMembers.length === 0 ? (
+              <p className="text-center py-4 text-slate-400 text-sm">暂无</p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">姓名</th>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">手机号</th>
+                      <th className="text-right px-2 py-1.5 text-xs font-semibold text-slate-600">累计消费</th>
+                      <th className="text-right px-2 py-1.5 text-xs font-semibold text-slate-600">累计充值</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {highValueMembers.map(m => (
+                      <tr key={m.id} className="border-b border-slate-50">
+                        <td className="px-2 py-1.5 text-sm text-slate-700">{m.name}</td>
+                        <td className="px-2 py-1.5 text-xs text-slate-500">{m.phone}</td>
+                        <td className="px-2 py-1.5 text-right text-xs text-emerald-600 font-medium">{formatMoney(m.totalConsumption)}</td>
+                        <td className="px-2 py-1.5 text-right text-xs text-blue-600 font-medium">{formatMoney(m.totalRecharge)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-600 mb-2">最近沉默明细</h4>
+            <p className="text-xs text-slate-400 mb-2">60天内无到店消费（之前有消费）</p>
+            {silentMembers.length === 0 ? (
+              <p className="text-center py-4 text-slate-400 text-sm">暂无</p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">姓名</th>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">手机号</th>
+                      <th className="text-right px-2 py-1.5 text-xs font-semibold text-slate-600">累计消费</th>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">上次到店</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {silentMembers.map(m => (
+                      <tr key={m.id} className="border-b border-slate-50">
+                        <td className="px-2 py-1.5 text-sm text-slate-700">{m.name}</td>
+                        <td className="px-2 py-1.5 text-xs text-slate-500">{m.phone}</td>
+                        <td className="px-2 py-1.5 text-right text-xs text-emerald-600 font-medium">{formatMoney(m.totalConsumption)}</td>
+                        <td className="px-2 py-1.5 text-xs text-amber-600">
+                          {memberLastVisitMap[m.id] ? formatDateTime(new Date(memberLastVisitMap[m.id]).toISOString()) : '无记录'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          <div>
+            <h4 className="text-sm font-semibold text-slate-600 mb-2">刚充值未复购明细</h4>
+            <p className="text-xs text-slate-400 mb-2">本月有充值但本月无消费</p>
+            {rechargedNoRepurchaseMembers.length === 0 ? (
+              <p className="text-center py-4 text-slate-400 text-sm">暂无</p>
+            ) : (
+              <div className="max-h-48 overflow-y-auto">
+                <table className="w-full">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">姓名</th>
+                      <th className="text-left px-2 py-1.5 text-xs font-semibold text-slate-600">手机号</th>
+                      <th className="text-right px-2 py-1.5 text-xs font-semibold text-slate-600">充值金额</th>
+                      <th className="text-right px-2 py-1.5 text-xs font-semibold text-slate-600">储值余额</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rechargedNoRepurchaseMembers.map(m => (
+                      <tr key={m.id} className="border-b border-slate-50">
+                        <td className="px-2 py-1.5 text-sm text-slate-700">{m.name}</td>
+                        <td className="px-2 py-1.5 text-xs text-slate-500">{m.phone}</td>
+                        <td className="px-2 py-1.5 text-right text-xs text-blue-600 font-medium">{formatMoney(memberMonthRechargeMap[m.id] || 0)}</td>
+                        <td className="px-2 py-1.5 text-right text-xs text-slate-600">{formatMoney(m.balance)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
