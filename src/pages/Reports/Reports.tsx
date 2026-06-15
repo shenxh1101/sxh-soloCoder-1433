@@ -23,7 +23,10 @@ import {
   UserCheck,
   Moon,
   Zap,
-  Target
+  Target,
+  ArrowRight,
+  RefreshCw,
+  Star
 } from 'lucide-react';
 import Button from '@/components/Button';
 import Avatar from '@/components/Avatar';
@@ -45,8 +48,16 @@ export default function Reports() {
     getMonthRecharges,
     getMonthPointRecords 
   } = useTransactionStore();
-  const { getMonthRecords: getMonthBirthdayCare } = useBirthdayCareStore();
-  const { getMonthRecords: getMonthFollowUps } = useFollowUpStore();
+  const { 
+    getMonthRecords: getMonthBirthdayCare, 
+    getMonthSentRecords, 
+    getMonthUsedRecords 
+  } = useBirthdayCareStore();
+  const { 
+    getMonthRecords: getMonthFollowUps, 
+    getMonthEffectiveness,
+    getCompletedMonthRecords 
+  } = useFollowUpStore();
 
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1);
   const [currentYear, setCurrentYear] = useState(new Date().getFullYear());
@@ -71,8 +82,23 @@ export default function Reports() {
     [currentYear, currentMonth]
   );
 
+  const monthSentBirthdayCare = useMemo(
+    () => getMonthSentRecords(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
+  const monthUsedBirthdayCare = useMemo(
+    () => getMonthUsedRecords(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
   const monthFollowUps = useMemo(
     () => getMonthFollowUps(currentYear, currentMonth),
+    [currentYear, currentMonth]
+  );
+
+  const monthEffectiveness = useMemo(
+    () => getMonthEffectiveness(currentYear, currentMonth),
     [currentYear, currentMonth]
   );
 
@@ -191,10 +217,124 @@ export default function Reports() {
   const netPointsChange = totalPointsIn - totalPointsOut;
 
   const birthdayCareStats = useMemo(() => {
-    const sent = monthBirthdayCare.filter(r => r.status !== 'pending').length;
-    const used = monthBirthdayCare.filter(r => r.status === 'used').length;
-    return { total: monthBirthdayCare.length, sent, used };
-  }, [monthBirthdayCare]);
+    return { 
+      total: monthBirthdayCare.length, 
+      sent: monthSentBirthdayCare.length, 
+      used: monthUsedBirthdayCare.length 
+    };
+  }, [monthBirthdayCare, monthSentBirthdayCare, monthUsedBirthdayCare]);
+
+  const funnelData = useMemo(() => {
+    const monthStart = new Date(currentYear, currentMonth - 1, 1).getTime();
+
+    const visitedMemberIds = new Set(monthTransactions.map(t => t.memberId));
+
+    const revisitedMemberIdsFromStore = new Set(monthEffectiveness.revisitedMemberIds);
+
+    const rechargedMemberIds = new Set(monthRecharges.map(r => r.memberId));
+
+    const memberLastVisitBeforeMonth: Record<string, number> = {};
+    transactions.forEach(t => {
+      const tTime = new Date(t.createdAt).getTime();
+      if (tTime < monthStart) {
+        if (!memberLastVisitBeforeMonth[t.memberId] || tTime > memberLastVisitBeforeMonth[t.memberId]) {
+          memberLastVisitBeforeMonth[t.memberId] = tTime;
+        }
+      }
+    });
+
+    const repurchaseMemberIds = new Set<string>();
+    visitedMemberIds.forEach(id => {
+      if (memberLastVisitBeforeMonth[id]) {
+        repurchaseMemberIds.add(id);
+      }
+    });
+
+    return {
+      visited: visitedMemberIds.size,
+      revisited: revisitedMemberIdsFromStore.size,
+      recharged: rechargedMemberIds.size,
+      repurchase: repurchaseMemberIds.size,
+    };
+  }, [monthTransactions, monthRecharges, monthEffectiveness, transactions, currentYear, currentMonth]);
+
+  const conversionRates = useMemo(() => {
+    const visitedToRevisited = funnelData.visited > 0 
+      ? ((funnelData.revisited / funnelData.visited) * 100).toFixed(1) 
+      : '0';
+    const revisitedToRecharged = funnelData.revisited > 0 
+      ? ((funnelData.recharged / funnelData.revisited) * 100).toFixed(1) 
+      : '0';
+    const rechargedToRepurchase = funnelData.recharged > 0 
+      ? ((funnelData.repurchase / funnelData.recharged) * 100).toFixed(1) 
+      : '0';
+    return { visitedToRevisited, revisitedToRecharged, rechargedToRepurchase };
+  }, [funnelData]);
+
+  const reflowMembers = useMemo(() => {
+    const monthStart = new Date(currentYear, currentMonth - 1, 1);
+    const monthStartTime = monthStart.getTime();
+    const today = new Date();
+
+    const monthVisitedMemberIds = new Set(monthTransactions.map(t => t.memberId));
+
+    const memberLastVisitBeforeMonth: Record<string, number> = {};
+    transactions.forEach(t => {
+      const tTime = new Date(t.createdAt).getTime();
+      if (tTime < monthStartTime) {
+        if (!memberLastVisitBeforeMonth[t.memberId] || tTime > memberLastVisitBeforeMonth[t.memberId]) {
+          memberLastVisitBeforeMonth[t.memberId] = tTime;
+        }
+      }
+    });
+
+    const result: { memberId: string; name: string; lastVisit: string; daysAway: number }[] = [];
+    monthVisitedMemberIds.forEach(id => {
+      const lastVisit = memberLastVisitBeforeMonth[id];
+      if (lastVisit) {
+        const daysAway = Math.floor((monthStartTime - lastVisit) / (1000 * 60 * 60 * 24));
+        if (daysAway > 30) {
+          const member = members.find(m => m.id === id);
+          const name = member?.name || (monthTransactions.find(t => t.memberId === id)?.memberName) || '未知';
+          result.push({
+            memberId: id,
+            name,
+            lastVisit: formatDateTime(new Date(lastVisit).toISOString()),
+            daysAway: Math.floor((today.getTime() - lastVisit) / (1000 * 60 * 60 * 24)),
+          });
+        }
+      }
+    });
+
+    return result.sort((a, b) => b.daysAway - a.daysAway);
+  }, [monthTransactions, transactions, members, currentYear, currentMonth]);
+
+  const keyFollowUpMembers = useMemo(() => {
+    const revisitedIds = monthEffectiveness.revisitedMemberIds;
+    return revisitedIds.map(id => {
+      const member = members.find(m => m.id === id);
+      const followUpRecord = monthFollowUps.find(f => f.memberId === id);
+      const lastVisitTx = [...monthTransactions]
+        .filter(t => t.memberId === id)
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+      
+      const name = member?.name || followUpRecord?.memberName || '未知';
+      const followUpAt = followUpRecord?.createdAt || '';
+      const lastVisit = lastVisitTx?.createdAt || '';
+      
+      return {
+        memberId: id,
+        name,
+        followUpAt: followUpAt ? formatDateTime(followUpAt) : '',
+        lastVisit: lastVisit ? formatDateTime(lastVisit) : '',
+      };
+    }).sort((a, b) => {
+      if (a.followUpAt && b.followUpAt) {
+        return new Date(b.followUpAt).getTime() - new Date(a.followUpAt).getTime();
+      }
+      return 0;
+    });
+  }, [monthEffectiveness, monthFollowUps, members, monthTransactions]);
 
   const frequentVisitors = useMemo(() => {
     const memberStats: Record<string, { name: string; count: number; amount: number }> = {};
@@ -324,6 +464,16 @@ export default function Reports() {
   };
 
   const handleExportOperationsReport = () => {
+    const completionRate = monthEffectiveness.total > 0 
+      ? ((monthEffectiveness.completed / monthEffectiveness.total) * 100).toFixed(1) + '%' 
+      : '0%';
+    const revisitRate = monthEffectiveness.completed > 0 
+      ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) + '%' 
+      : '0%';
+    const rechargeRate = monthEffectiveness.revisitedCount > 0 
+      ? ((monthEffectiveness.rechargeCount / monthEffectiveness.revisitedCount) * 100).toFixed(1) + '%' 
+      : '0%';
+
     const data = [
       { '指标': '【会员运营】', '数值': '', '备注': '' },
       { '指标': '会员总数', '数值': members.length, '备注': '累计注册会员' },
@@ -334,6 +484,17 @@ export default function Reports() {
       { '指标': '沉睡会员(>30天)', '数值': sleepMembers30, '备注': '超过30天没到店' },
       { '指标': '沉睡会员(>60天)', '数值': sleepMembers60, '备注': '超过60天没到店' },
       { '指标': '沉睡会员(>90天)', '数值': sleepMembers90, '备注': '超过90天没到店' },
+      { '指标': '【充值转化漏斗】', '数值': '', '备注': '' },
+      { '指标': '本月到店会员', '数值': funnelData.visited, '备注': '有交易的去重人数' },
+      { '指标': '已回访会员', '数值': funnelData.revisited, '备注': '本月回访记录关联的会员去重' },
+      { '指标': '到店→回访转化率', '数值': conversionRates.visitedToRevisited + '%', '备注': '' },
+      { '指标': '已充值会员', '数值': funnelData.recharged, '备注': '本月充值去重' },
+      { '指标': '回访→充值转化率', '数值': conversionRates.revisitedToRecharged + '%', '备注': '' },
+      { '指标': '已复购会员', '数值': funnelData.repurchase, '备注': '之前消费过，本月又有消费' },
+      { '指标': '充值→复购转化率', '数值': conversionRates.rechargedToRepurchase + '%', '备注': '' },
+      { '指标': '【老客回流】', '数值': '', '备注': '' },
+      { '指标': '沉睡回流水数', '数值': reflowMembers.length, '备注': '超30天未到店本月有消费' },
+      { '指标': '重点跟进回店数', '数值': keyFollowUpMembers.length, '备注': '回访后回店的会员数' },
       { '指标': '【消费充值】', '数值': '', '备注': '' },
       { '指标': '本月充值总额', '数值': formatMoney(totalRecharge), '备注': `${monthRecharges.length} 笔充值` },
       { '指标': '本月消费总额', '数值': formatMoney(totalConsumption), '备注': `${monthTransactions.length} 笔消费` },
@@ -342,11 +503,17 @@ export default function Reports() {
       { '指标': '积分总支出', '数值': totalPointsOut.toLocaleString(), '备注': '' },
       { '指标': '积分净变化', '数值': (netPointsChange >= 0 ? '+' : '') + netPointsChange.toLocaleString(), '备注': '' },
       { '指标': '【生日关怀】', '数值': '', '备注': '' },
-      { '指标': '本月生日关怀登记', '数值': birthdayCareStats.total, '备注': '' },
-      { '指标': '本月已发放', '数值': birthdayCareStats.sent, '备注': '' },
-      { '指标': '本月已使用', '数值': birthdayCareStats.used, '备注': '' },
-      { '指标': '【回访运营】', '数值': '', '备注': '' },
-      { '指标': '本月回访次数', '数值': monthFollowUps.length, '备注': '' },
+      { '指标': '本月生日关怀登记', '数值': birthdayCareStats.total, '备注': '按登记时间统计' },
+      { '指标': '本月已发放', '数值': birthdayCareStats.sent, '备注': '按发放时间统计' },
+      { '指标': '本月已使用', '数值': birthdayCareStats.used, '备注': '按使用时间统计' },
+      { '指标': '【回访运营成效】', '数值': '', '备注': '' },
+      { '指标': '本月登记回访数', '数值': monthEffectiveness.total, '备注': '' },
+      { '指标': '本月已完成回访数', '数值': monthEffectiveness.completed, '备注': '' },
+      { '指标': '回访完成率', '数值': completionRate, '备注': '' },
+      { '指标': '回访后回店人数', '数值': monthEffectiveness.revisitedCount, '备注': '' },
+      { '指标': '回店率', '数值': revisitRate, '备注': '回店人数/完成回访数' },
+      { '指标': '回访后充值人数', '数值': monthEffectiveness.rechargeCount, '备注': '' },
+      { '指标': '充值转化率', '数值': rechargeRate, '备注': '充值人数/回店人数' },
     ];
     exportToCSV(data, `会员运营月报_${currentYear}年${currentMonth}月.csv`);
   };
@@ -382,6 +549,13 @@ export default function Reports() {
       spend: 'bg-red-50 text-red-600',
     };
     return map[type];
+  };
+
+  const getRateColor = (rate: string) => {
+    const num = parseFloat(rate);
+    if (num >= 50) return 'text-emerald-600 bg-emerald-50';
+    if (num >= 30) return 'text-amber-600 bg-amber-50';
+    return 'text-red-600 bg-red-50';
   };
 
   const activationRate = members.length > 0 ? ((activeMembersThisMonth / members.length) * 100).toFixed(1) : '0';
@@ -525,24 +699,64 @@ export default function Reports() {
           <div className="p-4 bg-slate-50 rounded-xl">
             <h4 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
               <MessageSquare className="w-4 h-4 text-blue-500" />
-              回访运营
+              回访运营成效
             </h4>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="text-center p-3 bg-white rounded-lg">
-                <p className="text-lg font-bold text-slate-800">{monthFollowUps.length}</p>
-                <p className="text-xs text-slate-500">本月回访次数</p>
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-3 bg-white rounded-lg">
+                  <p className="text-xs text-slate-500 mb-1">登记回访</p>
+                  <p className="text-lg font-bold text-slate-800">{monthEffectiveness.total}</p>
+                </div>
+                <div className="text-center p-3 bg-white rounded-lg">
+                  <p className="text-xs text-slate-500 mb-1">已完成</p>
+                  <p className="text-lg font-bold text-emerald-600">{monthEffectiveness.completed}</p>
+                </div>
+                <div className="text-center p-3 bg-white rounded-lg">
+                  <p className="text-xs text-slate-500 mb-1">完成率</p>
+                  <p className="text-lg font-bold text-violet-600">
+                    {monthEffectiveness.total > 0 
+                      ? ((monthEffectiveness.completed / monthEffectiveness.total) * 100).toFixed(1) 
+                      : 0}%
+                  </p>
+                </div>
               </div>
-              <div className="text-center p-3 bg-white rounded-lg">
-                <p className="text-lg font-bold text-slate-800">
-                  {new Set(monthFollowUps.map(r => r.memberId)).size}
-                </p>
-                <p className="text-xs text-slate-500">回访会员数</p>
-              </div>
-              <div className="text-center p-3 bg-white rounded-lg">
-                <p className="text-lg font-bold text-emerald-600">
-                  {birthdayCareStats.used}
-                </p>
-                <p className="text-xs text-slate-500">生日券已使用</p>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-white rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-slate-500">回店人数</span>
+                    <span className="text-xs text-slate-400">回店率</span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-lg font-bold text-blue-600">{monthEffectiveness.revisitedCount}</p>
+                    <p className={`text-sm font-semibold px-2 py-0.5 rounded-full ${getRateColor(
+                      monthEffectiveness.completed > 0 
+                        ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) 
+                        : '0'
+                    )}`}>
+                      {monthEffectiveness.completed > 0 
+                        ? ((monthEffectiveness.revisitedCount / monthEffectiveness.completed) * 100).toFixed(1) 
+                        : 0}%
+                    </p>
+                  </div>
+                </div>
+                <div className="p-3 bg-white rounded-lg">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-xs text-slate-500">充值人数</span>
+                    <span className="text-xs text-slate-400">充值转化率</span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <p className="text-lg font-bold text-emerald-600">{monthEffectiveness.rechargeCount}</p>
+                    <p className={`text-sm font-semibold px-2 py-0.5 rounded-full ${getRateColor(
+                      monthEffectiveness.revisitedCount > 0 
+                        ? ((monthEffectiveness.rechargeCount / monthEffectiveness.revisitedCount) * 100).toFixed(1) 
+                        : '0'
+                    )}`}>
+                      {monthEffectiveness.revisitedCount > 0 
+                        ? ((monthEffectiveness.rechargeCount / monthEffectiveness.revisitedCount) * 100).toFixed(1) 
+                        : 0}%
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -566,6 +780,169 @@ export default function Reports() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <h3 className="font-semibold text-slate-800 mb-5 flex items-center gap-2">
+          <Target className="w-5 h-5 text-cyan-500" />
+          充值转化漏斗
+        </h3>
+        <div className="flex items-stretch justify-between gap-2">
+          <div className="flex-1 p-4 bg-blue-50 rounded-xl border border-blue-100">
+            <div className="flex items-center gap-2 text-blue-600 mb-2">
+              <Users className="w-4 h-4" />
+              <span className="text-sm font-medium">本月到店会员</span>
+            </div>
+            <p className="text-2xl font-bold text-blue-700">{funnelData.visited}</p>
+            <p className="text-xs text-blue-500 mt-1">有交易的去重人数</p>
+          </div>
+          
+          <div className="flex items-center justify-center px-1">
+            <div className="flex flex-col items-center">
+              <ArrowRight className="w-6 h-6 text-slate-300" />
+              <span className={`text-xs font-semibold mt-1 px-2 py-0.5 rounded-full ${getRateColor(conversionRates.visitedToRevisited)}`}>
+                {conversionRates.visitedToRevisited}%
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1 p-4 bg-violet-50 rounded-xl border border-violet-100">
+            <div className="flex items-center gap-2 text-violet-600 mb-2">
+              <MessageSquare className="w-4 h-4" />
+              <span className="text-sm font-medium">已回访会员</span>
+            </div>
+            <p className="text-2xl font-bold text-violet-700">{funnelData.revisited}</p>
+            <p className="text-xs text-violet-500 mt-1">回访记录关联会员</p>
+          </div>
+
+          <div className="flex items-center justify-center px-1">
+            <div className="flex flex-col items-center">
+              <ArrowRight className="w-6 h-6 text-slate-300" />
+              <span className={`text-xs font-semibold mt-1 px-2 py-0.5 rounded-full ${getRateColor(conversionRates.revisitedToRecharged)}`}>
+                {conversionRates.revisitedToRecharged}%
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1 p-4 bg-amber-50 rounded-xl border border-amber-100">
+            <div className="flex items-center gap-2 text-amber-600 mb-2">
+              <Wallet className="w-4 h-4" />
+              <span className="text-sm font-medium">已充值会员</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-700">{funnelData.recharged}</p>
+            <p className="text-xs text-amber-500 mt-1">本月充值去重</p>
+          </div>
+
+          <div className="flex items-center justify-center px-1">
+            <div className="flex flex-col items-center">
+              <ArrowRight className="w-6 h-6 text-slate-300" />
+              <span className={`text-xs font-semibold mt-1 px-2 py-0.5 rounded-full ${getRateColor(conversionRates.rechargedToRepurchase)}`}>
+                {conversionRates.rechargedToRepurchase}%
+              </span>
+            </div>
+          </div>
+
+          <div className="flex-1 p-4 bg-emerald-50 rounded-xl border border-emerald-100">
+            <div className="flex items-center gap-2 text-emerald-600 mb-2">
+              <RefreshCw className="w-4 h-4" />
+              <span className="text-sm font-medium">已复购会员</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-700">{funnelData.repurchase}</p>
+            <p className="text-xs text-emerald-500 mt-1">之前消费本月又消费</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-5">
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <Moon className="w-5 h-5 text-orange-500" />
+            沉睡回流
+            <span className="ml-2 px-2 py-0.5 bg-orange-100 text-orange-700 rounded-full text-xs font-semibold">
+              {reflowMembers.length} 人
+            </span>
+          </h3>
+          <p className="text-xs text-slate-500 mb-3">上月之前超过30天未到店、本月有消费的会员</p>
+          {reflowMembers.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              <Moon className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>本月暂无沉睡回流会员</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto max-h-64 overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">会员</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">上次到店</th>
+                    <th className="text-right px-3 py-2 text-xs font-semibold text-slate-600">距今天数</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reflowMembers.map((m) => (
+                    <tr key={m.memberId} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.name} size="sm" />
+                          <span className="font-medium text-slate-700 text-sm">{m.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{m.lastVisit}</td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`text-sm font-semibold ${m.daysAway > 90 ? 'text-red-600' : m.daysAway > 60 ? 'text-orange-600' : 'text-amber-600'}`}>
+                          {m.daysAway} 天
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+          <h3 className="font-semibold text-slate-800 mb-4 flex items-center gap-2">
+            <Star className="w-5 h-5 text-violet-500" />
+            重点跟进回店
+            <span className="ml-2 px-2 py-0.5 bg-violet-100 text-violet-700 rounded-full text-xs font-semibold">
+              {keyFollowUpMembers.length} 人
+            </span>
+          </h3>
+          <p className="text-xs text-slate-500 mb-3">本月回访后成功回店消费的会员</p>
+          {keyFollowUpMembers.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              <Star className="w-12 h-12 mx-auto mb-3 opacity-50" />
+              <p>本月暂无回访回店会员</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto max-h-64 overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-slate-50 sticky top-0">
+                  <tr>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">会员</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">回访时间</th>
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-slate-600">回店时间</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {keyFollowUpMembers.map((m) => (
+                    <tr key={m.memberId} className="border-b border-slate-50 hover:bg-slate-50/50">
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <Avatar name={m.name} size="sm" />
+                          <span className="font-medium text-slate-700 text-sm">{m.name}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-slate-500">{m.followUpAt}</td>
+                      <td className="px-3 py-2 text-xs text-emerald-600 font-medium">{m.lastVisit}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
 

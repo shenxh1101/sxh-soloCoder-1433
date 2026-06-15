@@ -24,7 +24,13 @@ import {
   Heart,
   CheckCircle,
   Plus,
-  Edit3
+  Edit3,
+  MessageCircle,
+  Send,
+  Users,
+  MoreHorizontal,
+  Check,
+  XCircle
 } from 'lucide-react';
 import Avatar from '@/components/Avatar';
 import Button from '@/components/Button';
@@ -49,7 +55,14 @@ export default function MemberDetail() {
   const { getMember } = useMemberStore();
   const { getMemberTransactions, getMemberRecharges, getMemberPointRecords } = useTransactionStore();
   const { getRecordsByMember: getBirthdayCareRecords } = useBirthdayCareStore();
-  const { getRecordsByMember: getFollowUpRecords, addRecord } = useFollowUpStore();
+  const { 
+    getRecordsByMember: getFollowUpRecords, 
+    addRecord,
+    completeRecord,
+    getOverdueDays,
+    hasRevisitedAfterFollowUp,
+    getPendingFollowUps
+  } = useFollowUpStore();
 
   const [showFollowUpModal, setShowFollowUpModal] = useState(false);
   const [followUpType, setFollowUpType] = useState<FollowUpRecord['type']>('phone');
@@ -58,12 +71,23 @@ export default function MemberDetail() {
   const [nextFollowUpAt, setNextFollowUpAt] = useState('');
   const [followUpOperator, setFollowUpOperator] = useState('店长');
 
+  const [showCompleteModal, setShowCompleteModal] = useState(false);
+  const [completingRecordId, setCompletingRecordId] = useState<string | null>(null);
+  const [completeResult, setCompleteResult] = useState('');
+
   const member = getMember(id || '');
   const transactions = getMemberTransactions(id || '');
   const recharges = getMemberRecharges(id || '');
   const pointRecords = getMemberPointRecords(id || '');
   const birthdayCareRecords = getBirthdayCareRecords(id || '');
   const followUpRecords = getFollowUpRecords(id || '');
+
+  const pendingFollowUps = followUpRecords.filter(
+    r => r.status === 'pending' && r.nextFollowUpAt
+  ).sort((a, b) => new Date(a.nextFollowUpAt!).getTime() - new Date(b.nextFollowUpAt!).getTime());
+
+  const doneRecords = followUpRecords.filter(r => r.status === 'done');
+  const sortedRecords = [...pendingFollowUps, ...doneRecords];
 
   if (!member) {
     return (
@@ -197,6 +221,28 @@ export default function MemberDetail() {
     return colors[type];
   };
 
+  const getFollowUpTypeIcon = (type: FollowUpRecord['type']) => {
+    const icons = {
+      phone: <PhoneCall className="w-5 h-5" />,
+      wechat: <MessageCircle className="w-5 h-5" />,
+      sms: <Send className="w-5 h-5" />,
+      visit: <Users className="w-5 h-5" />,
+      other: <MoreHorizontal className="w-5 h-5" />,
+    };
+    return icons[type];
+  };
+
+  const getFollowUpTypeIconBg = (type: FollowUpRecord['type']) => {
+    const colors = {
+      phone: 'bg-blue-100 text-blue-600',
+      wechat: 'bg-emerald-100 text-emerald-600',
+      sms: 'bg-amber-100 text-amber-600',
+      visit: 'bg-violet-100 text-violet-600',
+      other: 'bg-slate-100 text-slate-600',
+    };
+    return colors[type];
+  };
+
   const getLastTransactionSummary = () => {
     if (transactions.length === 0) return '暂无消费记录';
     const last = transactions[0];
@@ -222,6 +268,21 @@ export default function MemberDetail() {
     setFollowUpContent('');
     setFollowUpResult('');
     setNextFollowUpAt('');
+  };
+
+  const handleOpenCompleteModal = (recordId: string) => {
+    setCompletingRecordId(recordId);
+    setCompleteResult('');
+    setShowCompleteModal(true);
+  };
+
+  const handleConfirmComplete = () => {
+    if (completingRecordId) {
+      completeRecord(completingRecordId, completeResult || undefined);
+    }
+    setShowCompleteModal(false);
+    setCompletingRecordId(null);
+    setCompleteResult('');
   };
 
   const activityColors: Record<string, string> = {
@@ -343,7 +404,7 @@ export default function MemberDetail() {
             </div>
           </div>
           <Button 
-            variant={isHighRisk ? 'warning' : 'success'}
+            variant={isHighRisk ? 'danger' : 'success'}
             onClick={() => setShowFollowUpModal(true)}
           >
             <Plus className="w-4 h-4" />
@@ -429,6 +490,11 @@ export default function MemberDetail() {
                   <>
                     <p className="font-semibold text-slate-800 mt-0.5">
                       累计 {followUpRecords.length} 次
+                      {pendingFollowUps.length > 0 && (
+                        <span className="ml-2 text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">
+                          {pendingFollowUps.length} 待办
+                        </span>
+                      )}
                     </p>
                     <p className="text-xs text-slate-400 mt-0.5">
                       最近：{formatDate(followUpRecords[0].createdAt)}
@@ -500,13 +566,107 @@ export default function MemberDetail() {
       <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
         <div className="flex items-center justify-between mb-5">
           <h3 className="font-semibold text-slate-800 flex items-center gap-2">
-            <MessageSquare className="w-5 h-5 text-amber-500" />
-            回访记录
+            <AlertTriangle className="w-5 h-5 text-orange-500" />
+            回访待办
+            {pendingFollowUps.length > 0 && (
+              <span className="ml-1 text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-medium">
+                {pendingFollowUps.length} 项待完成
+              </span>
+            )}
           </h3>
           <Button variant="secondary" size="sm" onClick={() => setShowFollowUpModal(true)}>
             <Plus className="w-4 h-4" />
             新增回访
           </Button>
+        </div>
+
+        {pendingFollowUps.length === 0 ? (
+          <div className="text-center py-10 text-slate-400">
+            <CheckCircle className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            <p className="font-medium">暂无待办回访</p>
+            <p className="text-sm mt-1">所有回访任务都已完成，继续保持！</p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {pendingFollowUps.map(record => {
+              const overdueDays = getOverdueDays(record);
+              const isOverdue = overdueDays > 0;
+              return (
+                <div 
+                  key={record.id} 
+                  className={`p-4 rounded-xl border transition-colors ${
+                    isOverdue 
+                      ? 'bg-red-50 border-red-200 hover:bg-red-100/50' 
+                      : 'bg-amber-50 border-amber-200 hover:bg-amber-100/50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className={`p-2.5 rounded-xl flex-shrink-0 ${getFollowUpTypeIconBg(record.type)}`}>
+                        {getFollowUpTypeIcon(record.type)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap mb-2">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
+                            {getFollowUpTypeLabel(record.type)}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            创建：{formatDate(record.createdAt)} · {record.operator}
+                          </span>
+                        </div>
+                        <p className="text-sm font-medium text-slate-800 mb-1">回访内容</p>
+                        <p className="text-sm text-slate-600 line-clamp-2 mb-3">{record.content}</p>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <span className="text-xs flex items-center gap-1 text-slate-600">
+                            <Calendar className="w-3.5 h-3.5" />
+                            截止日期：{formatDate(record.nextFollowUpAt!)}
+                          </span>
+                          {isOverdue ? (
+                            <span className="text-xs flex items-center gap-1 text-red-600 font-semibold bg-red-100 px-2 py-0.5 rounded-full">
+                              <XCircle className="w-3.5 h-3.5" />
+                              已拖延 {overdueDays} 天
+                            </span>
+                          ) : (
+                            <span className="text-xs flex items-center gap-1 text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">
+                              <Clock className="w-3.5 h-3.5" />
+                              待跟进
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <Button 
+                      size="sm"
+                      onClick={() => handleOpenCompleteModal(record.id)}
+                      className="flex-shrink-0"
+                    >
+                      <Check className="w-4 h-4" />
+                      标记完成
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-semibold text-slate-800 flex items-center gap-2">
+            <MessageSquare className="w-5 h-5 text-amber-500" />
+            回访记录
+          </h3>
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+              待办 {pendingFollowUps.length}
+            </span>
+            <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+              已完成 {doneRecords.length}
+            </span>
+          </div>
         </div>
 
         {followUpRecords.length === 0 ? (
@@ -517,36 +677,83 @@ export default function MemberDetail() {
           </div>
         ) : (
           <div className="space-y-3">
-            {followUpRecords.slice(0, 10).map(record => (
-              <div key={record.id} className="p-4 bg-slate-50 rounded-xl hover:bg-slate-100 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-start gap-3">
-                    <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
-                      {getFollowUpTypeLabel(record.type)}
-                    </span>
-                    <span className="text-xs text-slate-400 mt-1">
-                      {formatDateTime(record.createdAt)} · {record.operator}
-                    </span>
+            {sortedRecords.slice(0, 10).map(record => {
+              const isPending = record.status === 'pending';
+              const overdueDays = isPending ? getOverdueDays(record) : 0;
+              const isOverdue = isPending && overdueDays > 0;
+              const revisitInfo = !isPending ? hasRevisitedAfterFollowUp(record.id) : null;
+              return (
+                <div 
+                  key={record.id} 
+                  className={`p-4 rounded-xl hover:bg-slate-100 transition-colors ${
+                    isPending ? 'bg-amber-50/50 border border-amber-100' : 'bg-slate-50'
+                  }`}
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3">
+                      <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${getFollowUpTypeColor(record.type)}`}>
+                        {getFollowUpTypeLabel(record.type)}
+                      </span>
+                      {isPending ? (
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+                          isOverdue 
+                            ? 'bg-red-100 text-red-600' 
+                            : 'bg-amber-100 text-amber-600'
+                        }`}>
+                          <Clock className="w-3 h-3 mr-1" />
+                          {isOverdue ? `已拖延 ${overdueDays} 天` : '待办中'}
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-600">
+                          <CheckCircle className="w-3 h-3 mr-1" />
+                          已完成
+                        </span>
+                      )}
+                      <span className="text-xs text-slate-400 mt-1">
+                        {formatDateTime(isPending ? record.createdAt : (record.completedAt || record.createdAt))} · {record.operator}
+                      </span>
+                    </div>
+                    {isPending && record.nextFollowUpAt && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                        isOverdue ? 'bg-red-50 text-red-600' : 'bg-amber-50 text-amber-600'
+                      }`}>
+                        <Calendar className="w-3 h-3" />
+                        {formatDate(record.nextFollowUpAt)}
+                      </span>
+                    )}
+                    {!isPending && revisitInfo && (
+                      <span className={`text-xs px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                        revisitInfo.revisited 
+                          ? 'bg-emerald-50 text-emerald-600' 
+                          : 'bg-slate-100 text-slate-400'
+                      }`}>
+                        {revisitInfo.revisited ? (
+                          <>
+                            <CheckCircle className="w-3 h-3" />
+                            ✅ 已回店
+                          </>
+                        ) : (
+                          <>
+                            <XCircle className="w-3 h-3" />
+                            未回店
+                          </>
+                        )}
+                      </span>
+                    )}
                   </div>
-                  {record.nextFollowUpAt && (
-                    <span className="text-xs bg-amber-50 text-amber-600 px-2 py-0.5 rounded-full flex items-center gap-1">
-                      <Clock className="w-3 h-3" />
-                      下次：{formatDate(record.nextFollowUpAt)}
-                    </span>
+                  <div className="mt-3">
+                    <p className="text-sm font-medium text-slate-700 mb-1">回访内容</p>
+                    <p className="text-sm text-slate-600">{record.content}</p>
+                  </div>
+                  {record.result && (
+                    <div className="mt-2 pt-2 border-t border-slate-200">
+                      <p className="text-sm font-medium text-slate-700 mb-1">回访结果</p>
+                      <p className="text-sm text-slate-600">{record.result}</p>
+                    </div>
                   )}
                 </div>
-                <div className="mt-3">
-                  <p className="text-sm font-medium text-slate-700 mb-1">回访内容</p>
-                  <p className="text-sm text-slate-600">{record.content}</p>
-                </div>
-                {record.result && (
-                  <div className="mt-2 pt-2 border-t border-slate-200">
-                    <p className="text-sm font-medium text-slate-700 mb-1">回访结果</p>
-                    <p className="text-sm text-slate-600">{record.result}</p>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
             {followUpRecords.length > 10 && (
               <p className="text-center text-sm text-slate-400 pt-2">
                 仅显示最近 10 条，共 {followUpRecords.length} 条记录
@@ -809,7 +1016,12 @@ export default function MemberDetail() {
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">下次回访</label>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                下次回访
+                <span className="ml-1 text-xs text-slate-400 font-normal">
+                  （不填则标记为已完成）
+                </span>
+              </label>
               <input
                 type="date"
                 value={nextFollowUpAt}
@@ -836,6 +1048,36 @@ export default function MemberDetail() {
             <Button className="flex-1" onClick={handleSubmitFollowUp}>
               <CheckCircle className="w-4 h-4" />
               保存
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showCompleteModal}
+        onClose={() => setShowCompleteModal(false)}
+        title="标记回访完成"
+        size="sm"
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">回访结果（可选）</label>
+            <textarea
+              value={completeResult}
+              onChange={(e) => setCompleteResult(e.target.value)}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              rows={3}
+              placeholder="补充本次回访的结果，如客户反馈、预约情况、成交情况等"
+            />
+          </div>
+
+          <div className="flex gap-3 pt-2">
+            <Button variant="secondary" className="flex-1" onClick={() => setShowCompleteModal(false)}>
+              取消
+            </Button>
+            <Button className="flex-1" onClick={handleConfirmComplete}>
+              <Check className="w-4 h-4" />
+              确认完成
             </Button>
           </div>
         </div>

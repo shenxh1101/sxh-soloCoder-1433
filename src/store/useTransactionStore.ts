@@ -132,6 +132,10 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     const member = memberStore.getMember(memberId);
     if (!member) throw new Error('会员不存在');
 
+    if (change < 0 && Math.abs(change) > member.points) {
+      throw new Error(`积分不足：可用积分 ${member.points}，尝试扣减 ${Math.abs(change)}`);
+    }
+
     const record: PointRecord = {
       id: generateId(),
       memberId,

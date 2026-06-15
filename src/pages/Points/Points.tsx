@@ -73,14 +73,21 @@ export default function Points() {
       alert('请输入积分数量');
       return;
     }
+    if (adjustType === 'sub' && points > selectedMember.points) {
+      alert(`积分不足：${selectedMember.name} 当前可用 ${selectedMember.points} 积分，无法扣减 ${points} 积分`);
+      return;
+    }
 
-    const change = adjustType === 'add' ? points : -points;
-    const type = adjustType === 'add' ? 'adjust_add' : 'adjust_sub';
-    const reasonText = reason || (adjustType === 'add' ? '手动增加积分' : '手动扣减积分');
+    try {
+      const change = adjustType === 'add' ? points : -points;
+      const type = adjustType === 'add' ? 'adjust_add' : 'adjust_sub';
+      const reasonText = reason || (adjustType === 'add' ? '手动增加积分' : '手动扣减积分');
 
-    addPointRecord(selectedMember.id, change, type, reasonText);
-
-    setShowModal(false);
+      addPointRecord(selectedMember.id, change, type, reasonText);
+      setShowModal(false);
+    } catch (e: any) {
+      alert(e.message || '操作失败');
+    }
   };
 
   const getTypeLabel = (type: string) => {
@@ -295,14 +302,31 @@ export default function Points() {
           </div>
 
           {selectedMember && points > 0 && (
-            <div className={`p-4 rounded-xl ${adjustType === 'add' ? 'bg-emerald-50' : 'bg-red-50'}`}>
-              <p className="text-sm">
-                调整后积分：
-                <span className={`font-bold text-lg ml-2 ${adjustType === 'add' ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {adjustType === 'add' ? selectedMember.points + points : selectedMember.points - points}
-                </span>
-              </p>
-            </div>
+            adjustType === 'sub' && points > selectedMember.points ? (
+              <div className="p-4 rounded-xl bg-red-50 border-2 border-red-200">
+                <p className="text-sm font-medium text-red-700 mb-1">⚠️ 积分不足，无法扣减</p>
+                <p className="text-sm text-red-600">
+                  可用积分：<span className="font-semibold">{selectedMember.points}</span>
+                  <span className="mx-2">/</span>
+                  尝试扣减：<span className="font-semibold">{points}</span>
+                </p>
+                <p className="text-xs text-red-500 mt-1">
+                  差额 {points - selectedMember.points} 积分，请减少扣减数量
+                </p>
+              </div>
+            ) : (
+              <div className={`p-4 rounded-xl ${adjustType === 'add' ? 'bg-emerald-50' : 'bg-orange-50'}`}>
+                <p className="text-sm text-slate-600">
+                  调整后积分：
+                  <span className={`font-bold text-lg ml-2 ${adjustType === 'add' ? 'text-emerald-600' : 'text-orange-600'}`}>
+                    {adjustType === 'add' ? selectedMember.points + points : selectedMember.points - points}
+                  </span>
+                  <span className="text-xs text-slate-500 ml-2">
+                    ({adjustType === 'add' ? '+' : ''}{adjustType === 'add' ? points : -points})
+                  </span>
+                </p>
+              </div>
+            )
           )}
 
           <div className="flex gap-3 pt-2">
@@ -313,6 +337,7 @@ export default function Points() {
               className="flex-1" 
               variant={adjustType === 'add' ? 'success' : 'danger'}
               onClick={handleSubmit}
+              disabled={adjustType === 'sub' && selectedMember && points > selectedMember.points}
             >
               确认{adjustType === 'add' ? '增加' : '扣减'}
             </Button>

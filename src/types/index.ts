@@ -86,6 +86,8 @@ export interface FollowUpRecord {
   nextFollowUpAt: string | null;
   createdAt: string;
   operator: string;
+  status: 'pending' | 'done';
+  completedAt: string | null;
 }
 
 export interface RechargeRule {

@@ -41,6 +41,10 @@ interface BirthdayCareState {
   getPendingRecords: () => BirthdayCareRecord[];
   
   getMonthRecords: (year: number, month: number) => BirthdayCareRecord[];
+  
+  getMonthSentRecords: (year: number, month: number) => BirthdayCareRecord[];
+  
+  getMonthUsedRecords: (year: number, month: number) => BirthdayCareRecord[];
 }
 
 export const useBirthdayCareStore = create<BirthdayCareState>((set, get) => ({
@@ -135,6 +139,26 @@ export const useBirthdayCareStore = create<BirthdayCareState>((set, get) => ({
     const end = new Date(year, month, 0, 23, 59, 59);
     return get().records.filter(r => {
       const d = new Date(r.createdAt);
+      return d >= start && d <= end;
+    });
+  },
+
+  getMonthSentRecords: (year, month) => {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59);
+    return get().records.filter(r => {
+      if (!r.sentAt || r.status === 'pending') return false;
+      const d = new Date(r.sentAt);
+      return d >= start && d <= end;
+    });
+  },
+
+  getMonthUsedRecords: (year, month) => {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59);
+    return get().records.filter(r => {
+      if (!r.usedAt || r.status !== 'used') return false;
+      const d = new Date(r.usedAt);
       return d >= start && d <= end;
     });
   },
