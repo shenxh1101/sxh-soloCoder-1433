@@ -62,6 +62,20 @@ export interface PointRecord {
   createdAt: string;
 }
 
+export interface BirthdayCareRecord {
+  id: string;
+  memberId: string;
+  memberName: string;
+  year: number;
+  couponType: string;
+  couponValue: string;
+  status: 'pending' | 'sent' | 'used';
+  sentAt: string | null;
+  usedAt: string | null;
+  notes: string;
+  createdAt: string;
+}
+
 export interface RechargeRule {
   amount: number;
   bonusPoints: number;

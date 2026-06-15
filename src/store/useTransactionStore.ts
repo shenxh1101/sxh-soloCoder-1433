@@ -43,6 +43,7 @@ interface TransactionState {
   
   getMonthTransactions: (year: number, month: number) => Transaction[];
   getMonthRecharges: (year: number, month: number) => Recharge[];
+  getMonthPointRecords: (year: number, month: number) => PointRecord[];
 }
 
 export const useTransactionStore = create<TransactionState>((set, get) => ({
@@ -147,6 +148,8 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     set({ pointRecords });
     storage.setPointRecords(pointRecords);
 
+    memberStore.updatePoints(memberId, change);
+
     return record;
   },
 
@@ -193,6 +196,15 @@ export const useTransactionStore = create<TransactionState>((set, get) => ({
     const start = new Date(year, month - 1, 1);
     const end = new Date(year, month, 0, 23, 59, 59);
     return get().recharges.filter(r => {
+      const d = new Date(r.createdAt);
+      return d >= start && d <= end;
+    });
+  },
+
+  getMonthPointRecords: (year, month) => {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 0, 23, 59, 59);
+    return get().pointRecords.filter(r => {
       const d = new Date(r.createdAt);
       return d >= start && d <= end;
     });

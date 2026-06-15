@@ -13,17 +13,20 @@ import Settings from '@/pages/Settings/Settings';
 import { useMemberStore } from '@/store/useMemberStore';
 import { useTransactionStore } from '@/store/useTransactionStore';
 import { useSettingsStore } from '@/store/useSettingsStore';
+import { useBirthdayCareStore } from '@/store/useBirthdayCareStore';
 
 function AppContent() {
   const loadMembers = useMemberStore(state => state.loadMembers);
   const loadTransactions = useTransactionStore(state => state.loadData);
   const loadSettings = useSettingsStore(state => state.loadSettings);
+  const loadBirthdayCare = useBirthdayCareStore(state => state.loadRecords);
 
   useEffect(() => {
     loadSettings();
     loadMembers();
     loadTransactions();
-  }, [loadSettings, loadMembers, loadTransactions]);
+    loadBirthdayCare();
+  }, [loadSettings, loadMembers, loadTransactions, loadBirthdayCare]);
 
   return (
     <Layout>
